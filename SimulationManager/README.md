@@ -3,6 +3,11 @@
 # DEV:
 - Ejecutar ./setup_env.bat para instalar todas las dependencias
 - Luego activar entorno virtual venv/Scripts/activateEjecutar main.py
-- Build app:
-    - pyinstaller --onefile --windowed --name SimulationManager --icon="img/icono.ico" --add-data "C:\Codes\UnityProjects\SimulationManager\venv\lib\site-packages\tiktoken_ext;tiktoken_ext" --hidden-import "tiktoken.load" main.py
+- Build app Windows:
+    **Dentro de app/**
+    - pyinstaller --onefile --windowed --name SimulationManager --icon="img/icono.ico" --add-data "..\venv\lib\site-packages\tiktoken_ext;tiktoken_ext" --hidden-import "tiktoken.load" main.py
     - Luego mover '.env' 'img' 'Responses' 'Simulations' y 'Template' a la carpeta /dist que dentro tiene SimulationManager.exe
+- Build app MacOS:
+    **Dentro de app/** 
+    - pip3 install pyinstaller
+    - pyinstaller --onefile --windowed --name SimulationManager --icon="img/icono.icns" --add-data "../venv/lib/site-packages/tiktoken_ext:tiktoken_ext" --hidden-import "tiktoken.load" main.py
