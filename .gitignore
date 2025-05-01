@@ -1,0 +1,5 @@
+server_app/.venv
+server_app/Responses
+client_app/Simulations
+client_app/.venv
+client_app/dist
