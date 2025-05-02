@@ -3,14 +3,12 @@ using Unity.Mathematics;
 using Unity.Physics;
 
 [UpdateInGroup(typeof(SimulationSystemGroup))]
-// Opcional: [AlwaysUpdateSystem] para garantizar que se ejecute cada frame
 public partial class VelocityClampSystem : SystemBase
 {
     protected override void OnUpdate()
     {
-        // Define umbrales máximos para velocidad lineal y angular
-        float maxLinear = 0.5f;   // Ajusta este valor según lo que consideres realista
-        float maxAngular = 0.5f;  // Ajusta este valor según lo que consideres realista
+        float maxLinear = 0.5f;
+        float maxAngular = 0.5f;
 
         Entities.ForEach((ref PhysicsVelocity velocity) =>
         {

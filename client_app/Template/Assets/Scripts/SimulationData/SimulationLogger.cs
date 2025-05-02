@@ -9,232 +9,336 @@ using System.Linq;
 
 public class SimulationLogger : MonoBehaviour
 {
-    private const float LogInterval = 5f;             // Intervalo de 5 segundos para registrar datos
-    private const string CsvSeparator = ";";          // Separador de campos en el CSV
+    private const string LogTag = "[SimulationLogger]";
+    private const string LogSubfolder = "SimulationLoggerData";
+    private const string CsvSeparator = ";";
     private const string CsvFileName = "SimulationStats.csv";
+    private const int MaxBufferSize = 100;
+    private const float BatchWriteInterval = 1.0f;
 
-    // Nombre de la simulación (se leerá de simulation_loaded.txt; si no existe, se usará "DefaultSimulation")
+    [Tooltip("Base name for the simulation if not loaded from 'simulation_loaded.txt'.")]
     [SerializeField]
     private string simulationName = "DefaultSimulation";
-
-    private float lastLogTime = 0f;
     private string logFilePath;
+    private string simulationFolderPath;
     private bool isLogging = false;
     private Left_GUI leftGui;
+    private List<string> logBuffer = new List<string>();
+    private float lastBatchWriteTime = 0f;
+    private string currentPersistentPath;
+    private bool headerWritten = false;
+
+    #region Unity Lifecycle Methods
+
+    private void Awake()
+    {
+        currentPersistentPath = Application.persistentDataPath;
+        Debug.Log($"{LogTag} Awake: Script initializing. persistentDataPath = '{currentPersistentPath}'");
+    }
 
     private void Start()
     {
-        // Intentar leer simulation_loaded.txt desde StreamingAssets
-        string simulationLoadedFile = Path.Combine(Application.streamingAssetsPath, "simulation_loaded.txt");
-        Debug.Log($"SimulationLogger: Leyendo {simulationLoadedFile}...");
-        if (File.Exists(simulationLoadedFile))
-        {
-            try
-            {
-                string loadedName = File.ReadAllText(simulationLoadedFile).Trim();
-                if (!string.IsNullOrEmpty(loadedName))
-                {
-                    simulationName = loadedName;
-                    Debug.Log($"SimulationLogger: Nombre de simulación actualizado a: {simulationName}");
-                }
-                else
-                {
-                    simulationName = "DefaultSimulation";
-                    Debug.LogWarning("SimulationLogger: El archivo simulation_loaded.txt está vacío. Usando 'DefaultSimulation'.");
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError("SimulationLogger: Error al leer simulation_loaded.txt: " + ex.Message);
-                simulationName = "DefaultSimulation";
-            }
-        }
-        else
-        {
-            simulationName = "DefaultSimulation";
-            Debug.LogWarning("SimulationLogger: No se encontró simulation_loaded.txt en StreamingAssets. Usando 'DefaultSimulation'.");
-        }
-
-        // Buscar el Left_GUI en la escena
+        Debug.Log($"{LogTag} Start: Starting setup...");
+        ReadSimulationNameFromFile();
         leftGui = FindFirstObjectByType<Left_GUI>();
         if (leftGui == null)
         {
-            Debug.LogError("SimulationLogger: No se encontró Left_GUI en la escena.");
-            enabled = false;
-            return;
+            Debug.LogError($"{LogTag} Start: {nameof(Left_GUI)} not found. Logger disabled.");
+            enabled = false; return;
         }
-
-        // Utilizar la carpeta "My Documents" para almacenar los resultados.
-        string documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        string folderPath = Path.Combine(documentsPath, "SimulationLoggerData", simulationName);
-        if (!Directory.Exists(folderPath))
+        Debug.Log($"{LogTag} Start: {nameof(Left_GUI)} found.");
+        if (!SetupLogFilePath())
         {
-            try
-            {
-                Directory.CreateDirectory(folderPath);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"SimulationLogger: Error al crear la carpeta '{folderPath}': {ex.Message}");
-                enabled = false;
-                return;
-            }
+             enabled = false; return;
         }
 
-        logFilePath = Path.Combine(folderPath, CsvFileName);
-        Debug.Log($"SimulationLogger: El CSV se almacenará en: {logFilePath}");
-
-        // En build, esperar a que Left_GUI tenga los nombres reales de los organismos antes de iniciar la captura.
         if (!Application.isEditor)
         {
+            Debug.Log($"{LogTag} Start: In Build mode, starting coroutine to wait for {nameof(Left_GUI)}...");
             StartCoroutine(WaitForOrganismNamesAndStartLogging());
         }
-    }
-
-    // En editor se permite iniciar/detener mediante botón
-    private void OnGUI()
-    {
-        if (Application.isEditor)
+        else
         {
-            string buttonText = isLogging ? "Finalizar captación de estadísticas" : "Iniciar captación de estadísticas";
-            if (GUI.Button(new Rect(10, Screen.height - 50, 250, 40), buttonText))
-            {
-                if (isLogging)
-                    StopLogging();
-                else
-                    StartLogging();
-            }
+            Debug.Log($"{LogTag} Start: In Editor mode.");
         }
+        Debug.Log($"{LogTag} Start: Setup completed.");
     }
 
     private void Update()
     {
-        if (isLogging && Time.time - lastLogTime >= LogInterval)
+        if (!isLogging) return;
+
+        try
         {
-            lastLogTime = Time.time;
-            LogAllData();
+             bool isPaused = GameStateManager.IsPaused;
+             if (!isPaused)
+             {
+                 string logLine = GenerateLogLine();
+                 if (!string.IsNullOrEmpty(logLine))
+                 {
+                     logBuffer.Add(logLine);
+                 }
+             }
+
+             if (logBuffer.Count >= MaxBufferSize || (Time.time - lastBatchWriteTime >= BatchWriteInterval && logBuffer.Count > 0) )
+             {
+                 WriteBufferToFile();
+             }
+        }
+        catch (Exception ex)
+        {
+             Debug.LogError($"{LogTag} Update: Unexpected error: {ex.ToString()}");
         }
     }
 
-    /// <summary>
-    /// Espera hasta que leftGui.OrganismNames contenga al menos un nombre real
-    /// (es decir, un nombre distinto a un valor marcador como "Cantidad de organismos").
-    /// </summary>
+    private void OnGUI()
+    {
+        if (Application.isEditor)
+        {
+            Rect buttonRect = new Rect(10, Screen.height - 50, 250, 40);
+            string buttonText = isLogging ? "Stop Logging (Batch)" : "Start Logging (Batch)";
+            if (GUI.Button(buttonRect, buttonText))
+            {
+                if (isLogging) { StopLogging(); }
+                else {
+                    bool guiReady = leftGui != null && leftGui.enabled;
+                    bool namesReady = leftGui?.OrganismNames != null && leftGui.OrganismNames.Any();
+                    if (guiReady && namesReady) { StartLogging(); }
+                    else { Debug.LogWarning($"{LogTag} OnGUI: Cannot start. {nameof(Left_GUI)} is not ready (Enabled: {guiReady}, Names Loaded: {namesReady})."); }
+                }
+            }
+        }
+    }
+
+    private void OnApplicationQuit()
+    {
+        Debug.Log($"{LogTag} OnApplicationQuit: Application closing.");
+        if (isLogging && logBuffer.Count > 0)
+        {
+            Debug.Log($"{LogTag} OnApplicationQuit: Writing remaining buffer ({logBuffer.Count} lines)...");
+            WriteBufferToFile();
+        }
+        isLogging = false;
+    }
+
+     private void OnDestroy()
+     {
+         Debug.Log($"{LogTag} OnDestroy: Logger object destroyed.");
+         if (isLogging && logBuffer.Count > 0)
+         {
+             Debug.LogWarning($"{LogTag} OnDestroy: Destroyed while logging with pending buffer. Final save...");
+             WriteBufferToFile();
+         }
+         isLogging = false;
+     }
+
+    #endregion
+
+    #region Logging Control Methods
+
     private IEnumerator WaitForOrganismNamesAndStartLogging()
     {
-        Debug.Log("SimulationLogger: Esperando a que Left_GUI cachee los tipos de organismos...");
-        // Espera indefinidamente hasta que leftGui no sea nulo
-        // y la lista validComponentTypes (la fuente real de nombres específicos) contenga al menos un elemento.
-        while (leftGui == null || leftGui.validComponentTypes == null || !leftGui.validComponentTypes.Any()) // <-- Condición Cambiada
+        Debug.Log($"{LogTag} {nameof(WaitForOrganismNamesAndStartLogging)}: Started. Waiting for conditions...");
+        while (true)
         {
-            // Opcional: Añadir un pequeño delay para no consumir 100% CPU en el bucle while si algo va mal
-            // yield return new WaitForSeconds(0.1f);
-            yield return null; // Espera al siguiente frame
+             bool guiExists = leftGui != null;
+             bool guiEnabled = guiExists && leftGui.enabled;
+             bool namesAvailable = guiEnabled && leftGui?.OrganismNames != null && leftGui.OrganismNames.Any();
+
+             if (guiExists && guiEnabled && namesAvailable)
+             {
+                 Debug.Log($"{LogTag} {nameof(WaitForOrganismNamesAndStartLogging)}: Conditions met! Starting logging.");
+                 StartLogging();
+                 yield break;
+             }
+             yield return new WaitForSeconds(0.2f);
         }
-        Debug.Log($"SimulationLogger: Left_GUI tiene {leftGui.validComponentTypes.Count} tipos de organismos. Iniciando logging.");
-        StartLogging();
     }
 
-    /// <summary>
-    /// Inicia la captura de datos: elimina el archivo CSV anterior (si existe) y escribe el encabezado.
-    /// </summary>
-    private void StartLogging()
+    public void StartLogging()
     {
+        Debug.Log($"{LogTag} {nameof(StartLogging)}: Attempting to start logging...");
+        if (isLogging) { Debug.LogWarning($"{LogTag} {nameof(StartLogging)}: Already active."); return; }
+
+        if (leftGui == null || !leftGui.enabled) { Debug.LogError($"{LogTag} {nameof(StartLogging)}: Failed - {nameof(Left_GUI)} not available."); return; }
+        if (leftGui.OrganismNames == null || !leftGui.OrganismNames.Any()) { Debug.LogError($"{LogTag} {nameof(StartLogging)}: Failed - {nameof(Left_GUI)} has no organism names."); return; }
+        if (string.IsNullOrEmpty(logFilePath)) { Debug.LogError($"{LogTag} {nameof(StartLogging)}: Failed - File path not configured."); return; }
+
         if (File.Exists(logFilePath))
         {
-            try
-            {
-                File.Delete(logFilePath);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"SimulationLogger: Error al eliminar el archivo anterior: {ex.Message}");
-            }
+            Debug.Log($"{LogTag} {nameof(StartLogging)}: Previous file exists at '{logFilePath}'. Attempting to delete...");
+            try { File.Delete(logFilePath); Debug.Log($"{LogTag} {nameof(StartLogging)}: Previous file deleted."); }
+            catch (Exception ex) { Debug.LogError($"{LogTag} {nameof(StartLogging)}: Error deleting '{logFilePath}': {ex.ToString()}. Aborting start."); return; }
+        } else {
+            Debug.Log($"{LogTag} {nameof(StartLogging)}: No previous file exists at '{logFilePath}'.");
         }
+
         isLogging = true;
-        lastLogTime = Time.time;
-        WriteCSVHeader();
-        Debug.Log("SimulationLogger: Captación de estadísticas iniciada.");
+        logBuffer.Clear();
+        lastBatchWriteTime = Time.time;
+        headerWritten = false;
+
+        Debug.Log($"{LogTag} {nameof(StartLogging)}: *** Logging started ***. Saving to: {logFilePath}. Header will be written with the first data batch.");
     }
 
-    /// <summary>
-    /// Detiene la captura de datos.
-    /// </summary>
-    private void StopLogging()
+    public void StopLogging()
     {
-        isLogging = false;
-        Debug.Log($"SimulationLogger: Captación de estadísticas finalizada. Archivo guardado en: {logFilePath}");
+       Debug.Log($"{LogTag} {nameof(StopLogging)}: Attempting to stop logging...");
+       if (!isLogging) { Debug.LogWarning($"{LogTag} {nameof(StopLogging)}: Already stopped."); return; }
+
+       isLogging = false;
+       WriteBufferToFile();
+       Debug.Log($"{LogTag} {nameof(StopLogging)}: *** Logging finished ***. File: {logFilePath}");
     }
 
-    /// <summary>
-    /// Registra en una línea los datos actuales de la simulación y el conteo de organismos.
-    /// </summary>
-    private void LogAllData()
+    #endregion
+
+    #region Data Handling and File IO
+
+    private void ReadSimulationNameFromFile()
     {
-        if (leftGui == null || !isLogging)
-            return;
+        string simulationLoadedFile = Path.Combine(Application.streamingAssetsPath, "simulation_loaded.txt");
+        Debug.Log($"{LogTag} {nameof(ReadSimulationNameFromFile)}: Looking for name in '{simulationLoadedFile}'");
+        try {
+             if (File.Exists(simulationLoadedFile)) {
+                 string loadedName = File.ReadAllText(simulationLoadedFile).Trim();
+                 if (!string.IsNullOrEmpty(loadedName)) {
+                     simulationName = loadedName;
+                     Debug.Log($"{LogTag} {nameof(ReadSimulationNameFromFile)}: Name loaded: '{simulationName}'");
+                 } else {
+                     Debug.LogWarning($"{LogTag} {nameof(ReadSimulationNameFromFile)}: File empty. Using '{simulationName}'.");
+                 }
+             } else {
+                 Debug.LogWarning($"{LogTag} {nameof(ReadSimulationNameFromFile)}: File not found. Using '{simulationName}'.");
+             }
+        } catch (Exception ex) {
+             Debug.LogError($"{LogTag} {nameof(ReadSimulationNameFromFile)}: Error reading: {ex.ToString()}. Using '{simulationName}'.");
+             simulationName = "DefaultSimulation";
+        }
+    }
 
-        StringBuilder csvLine = new StringBuilder();
-        csvLine.Append(DateTime.Now.ToString("dd-MM-yyyy HH:mm:ss", CultureInfo.InvariantCulture));
-        csvLine.Append(CsvSeparator);
-        csvLine.Append(leftGui.cachedFPS.ToString("F2", CultureInfo.InvariantCulture)).Append(CsvSeparator);
-        csvLine.Append(leftGui.cachedRealTime.ToString("F2", CultureInfo.InvariantCulture)).Append(CsvSeparator);
-        csvLine.Append(leftGui.cachedSimulatedTime.ToString("F2", CultureInfo.InvariantCulture)).Append(CsvSeparator);
-        csvLine.Append(GameStateManager.DeltaTime.ToString("F2", CultureInfo.InvariantCulture)).Append(CsvSeparator);
-        csvLine.Append(leftGui.cachedFrameCount.ToString(CultureInfo.InvariantCulture)).Append(CsvSeparator);
-        csvLine.Append(GameStateManager.IsPaused ? "Sí" : "No");
+    private bool SetupLogFilePath()
+    {
+        Debug.Log($"{LogTag} {nameof(SetupLogFilePath)}: Configuring paths...");
+        try {
+            if (string.IsNullOrEmpty(currentPersistentPath)) {
+                 Debug.LogError($"{LogTag} {nameof(SetupLogFilePath)}: persistentDataPath is null."); return false;
+            }
+            Debug.Log($"{LogTag} {nameof(SetupLogFilePath)}: Using base: '{currentPersistentPath}'");
+            simulationFolderPath = Path.Combine(currentPersistentPath, LogSubfolder, simulationName);
+            Debug.Log($"{LogTag} {nameof(SetupLogFilePath)}: Log folder path: '{simulationFolderPath}'");
+            if (!Directory.Exists(simulationFolderPath)) {
+                Debug.Log($"{LogTag} {nameof(SetupLogFilePath)}: Creating directory...");
+                try { Directory.CreateDirectory(simulationFolderPath); Debug.Log($"{LogTag} {nameof(SetupLogFilePath)}: Directory created."); }
+                catch (Exception dex) { Debug.LogError($"{LogTag} {nameof(SetupLogFilePath)}: ERROR creating directory '{simulationFolderPath}': {dex.ToString()}"); return false; }
+            } else { Debug.Log($"{LogTag} {nameof(SetupLogFilePath)}: Directory already exists."); }
+            logFilePath = Path.Combine(simulationFolderPath, CsvFileName);
+            Debug.Log($"{LogTag} {nameof(SetupLogFilePath)}: CSV file path: '{logFilePath}'");
+            return true;
+        } catch (Exception ex) {
+            Debug.LogError($"{LogTag} {nameof(SetupLogFilePath)}: Critical error configuring paths: {ex.ToString()}");
+            logFilePath = null; simulationFolderPath = null;
+            return false;
+        }
+    }
 
-        if (leftGui.OrganismNames != null)
+    private string GenerateLogLine()
+    {
+        if (leftGui == null || leftGui.OrganismNames == null) return null;
+
+        try {
+             StringBuilder csvLine = new StringBuilder();
+             string timestamp = DateTime.Now.ToString("dd-MM-yyyy HH:mm:ss", CultureInfo.InvariantCulture);
+             csvLine.Append(timestamp);
+             csvLine.Append(CsvSeparator).Append(leftGui.cachedFPS.ToString("F2", CultureInfo.InvariantCulture));
+             csvLine.Append(CsvSeparator).Append(leftGui.cachedRealTime.ToString("F2", CultureInfo.InvariantCulture));
+             csvLine.Append(CsvSeparator).Append(leftGui.cachedSimulatedTime.ToString("F2", CultureInfo.InvariantCulture));
+             csvLine.Append(CsvSeparator).Append(GameStateManager.DeltaTime.ToString("F4", CultureInfo.InvariantCulture));
+             csvLine.Append(CsvSeparator).Append(leftGui.cachedFrameCount.ToString(CultureInfo.InvariantCulture));
+             csvLine.Append(CsvSeparator).Append(GameStateManager.IsPaused ? "Yes" : "No");
+
+             if (leftGui.OrganismNames.Any() && leftGui.entityCounts != null) {
+                 foreach (var orgName in leftGui.OrganismNames) {
+                     leftGui.entityCounts.TryGetValue(orgName, out int count);
+                     csvLine.Append(CsvSeparator).Append(count.ToString(CultureInfo.InvariantCulture));
+                 }
+             }
+
+             return csvLine.ToString();
+        } catch (Exception ex) {
+             Debug.LogError($"{LogTag} {nameof(GenerateLogLine)}: Error generating line: {ex.ToString()}");
+             return null;
+        }
+    }
+
+    private void WriteBufferToFile()
+    {
+        if (!headerWritten)
         {
-            foreach (var orgName in leftGui.OrganismNames)
+            Debug.Log($"{LogTag} {nameof(WriteBufferToFile)}: Header not yet written. Attempting to write header...");
+            if (WriteCSVHeader())
             {
-                int count = 0;
-                if (leftGui.entityCounts != null && leftGui.entityCounts.TryGetValue(orgName, out count))
-                {
-                    // Se obtiene el conteo correcto.
-                }
-                csvLine.Append(CsvSeparator).Append(count.ToString(CultureInfo.InvariantCulture));
+                headerWritten = true;
+                Debug.Log($"{LogTag} {nameof(WriteBufferToFile)}: Header written successfully.");
+            }
+            else
+            {
+                Debug.LogError($"{LogTag} {nameof(WriteBufferToFile)}: Header write failed. Buffer data will not be written to prevent corruption.");
+                return;
             }
         }
-        csvLine.AppendLine();
+
+        if (logBuffer == null || logBuffer.Count == 0) {
+             return;
+        }
+        if (string.IsNullOrEmpty(logFilePath)) {
+             Debug.LogError($"{LogTag} {nameof(WriteBufferToFile)}: Attempted to write buffer but file path is invalid.");
+             logBuffer.Clear();
+             return;
+         }
+
+        List<string> bufferToWrite = new List<string>(logBuffer);
+        logBuffer.Clear();
 
         try
         {
-            File.AppendAllText(logFilePath, csvLine.ToString());
+            string batchContent = string.Join(Environment.NewLine, bufferToWrite) + Environment.NewLine;
+            File.AppendAllText(logFilePath, batchContent, System.Text.Encoding.UTF8);
+            lastBatchWriteTime = Time.time;
         }
         catch (Exception ex)
         {
-            Debug.LogError($"SimulationLogger: Error al escribir en el CSV: {ex.Message}");
+            Debug.LogError($"{LogTag} {nameof(WriteBufferToFile)}: Error writing buffer to '{logFilePath}': {ex.ToString()}");
         }
     }
 
-    /// <summary>
-    /// Escribe el encabezado del CSV con los nombres de las columnas.
-    /// </summary>
-    private void WriteCSVHeader()
+    private bool WriteCSVHeader()
     {
-        List<string> headers = new List<string>
-        {
-            "Timestamp",
-            "FPS",
-            "RealTime",
-            "SimulatedTime",
-            "DeltaTime",
-            "FrameCount",
-            "Pausado"
-        };
+        Debug.Log($"{LogTag} {nameof(WriteCSVHeader)}: Building and writing header...");
+        if (leftGui == null) { Debug.LogError($"{LogTag} {nameof(WriteCSVHeader)}: Failed - {nameof(Left_GUI)} is null."); return false; }
+        if (leftGui.OrganismNames == null || !leftGui.OrganismNames.Any()) {
+            Debug.LogError($"{LogTag} {nameof(WriteCSVHeader)}: Failed - {nameof(Left_GUI)}.OrganismNames is null or empty at this time. Cannot write complete header.");
+            return false;
+        }
+        if (string.IsNullOrEmpty(logFilePath)) { Debug.LogError($"{LogTag} {nameof(WriteCSVHeader)}: Failed - File path not configured."); return false; }
 
-        if (leftGui != null && leftGui.OrganismNames != null && leftGui.OrganismNames.Any())
-            headers.AddRange(leftGui.OrganismNames);
-
+        List<string> headers = new List<string> { "Timestamp", "FPS", "RealTime", "SimulatedTime", "DeltaTime", "FrameCount", "Paused" }; // Changed from Spanish
+        headers.AddRange(leftGui.OrganismNames);
         string headerLine = string.Join(CsvSeparator, headers) + Environment.NewLine;
+        Debug.Log($"{LogTag} {nameof(WriteCSVHeader)}: Header to write: {headerLine.Trim()}");
+
         try
         {
-            File.AppendAllText(logFilePath, headerLine);
+            File.WriteAllText(logFilePath, headerLine, System.Text.Encoding.UTF8);
+            Debug.Log($"{LogTag} {nameof(WriteCSVHeader)}: Header written successfully to '{logFilePath}'.");
+            return true;
         }
         catch (Exception ex)
         {
-            Debug.LogError($"SimulationLogger: Error al escribir el encabezado en el CSV: {ex.Message}");
+            Debug.LogError($"{LogTag} {nameof(WriteCSVHeader)}: ERROR writing header to '{logFilePath}'!: {ex.ToString()}");
+            return false;
         }
     }
+
+    #endregion
 }

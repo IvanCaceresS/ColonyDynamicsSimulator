@@ -1,79 +1,41 @@
-#Requires -Version 5.1
-<#
-.SYNOPSIS
-Configures the Python environment, installs dependencies, builds the executable, moves the result, and cleans up.
-
-.DESCRIPTION
-This script performs the following actions automatically:
-0.5. Cleans up previous build output (Windows_dist in parent dir).
-1. Defines necessary paths.
-2. Cleans up the previous virtual environment (.venv in app dir).
-3. Verifies Python 3 is installed and matches the required version (3.9.11).
-4. Creates a new Python virtual environment (.venv).
-5. Installs/upgrades pip, setuptools, wheel within the venv.
-6. Installs PyInstaller within the venv.
-7. Installs dependencies from windows_requirements.txt within the venv.
-8. Builds the executable using PyInstaller (into ./Windows_dist in app dir).
-9. Copies additional required files/folders (.env, img, Template) into ./Windows_dist.
-10. Cleans up intermediate files (./build, ./*.spec in app dir).
-11. Moves the final ./Windows_dist folder from app dir to the parent directory.
-12. Cleans up the virtual environment (./.venv in app dir).
-
-.NOTES
-Author: Gemini
-Date: 2025-04-30
-May require adjusting the PowerShell Execution Policy.
-Example: Set-ExecutionPolicy RemoteSigned -Scope CurrentUser (run as Administrator)
-or run as: powershell.exe -ExecutionPolicy Bypass -File .\windows_setup.ps1
-#>
-
-# Strict mode and error handling preferences
 Set-StrictMode -Version Latest
-$ErrorActionPreference = 'Stop' # Exit script on terminating errors
-
-# --- Configuration ---
-$ScriptDir = $PSScriptRoot # Directory where this .ps1 script is located
+$ErrorActionPreference = 'Stop'
+$ScriptDir = $PSScriptRoot
 if (-not $ScriptDir) {
     $ScriptDir = Split-Path -Path $MyInvocation.MyCommand.Path -Parent
 }
 Write-Host "Script directory: $ScriptDir" -ForegroundColor Cyan
 
-$RequiredPythonVersion = '3.9.11' # Define the required Python version here
+$RequiredPythonVersion = '3.9.11'
 
 $VenvDirName = ".venv"
-$RequirementsFileName = "windows_requirements.txt"
+$RequirementsFileName = "Windows_requirements.txt"
 $MainScriptName = "main.py"
 $BuildName = "SimulationManager"
 $IconWinRelPath = "img\icono.ico"
 $ItemsToCopyRel = @(".env", "img", "Template")
-$DistDirName = "Windows_dist" # Final directory name
+$DistDirName = "Windows_dist"
 $BuildDirName = "build"
 
-# --- Calculated Paths ---
-# Paths within the script/app directory
 $VenvDir = Join-Path $ScriptDir $VenvDirName
 $RequirementsFile = Join-Path $ScriptDir $RequirementsFileName
 $MainScript = Join-Path $ScriptDir $MainScriptName
 $IconWin = Join-Path $ScriptDir $IconWinRelPath
 $ItemsToCopy = $ItemsToCopyRel | ForEach-Object { Join-Path $ScriptDir $_ }
-$BuildDistDir = Join-Path $ScriptDir $DistDirName # PyInstaller output dir within 'app'
+$BuildDistDir = Join-Path $ScriptDir $DistDirName
 $BuildDir = Join-Path $ScriptDir $BuildDirName
 $SpecFile = Join-Path $ScriptDir "$($BuildName).spec"
 
-# Paths in the parent directory (calculated early for initial cleanup)
 $ParentDir = Split-Path -Path $ScriptDir -Parent
 if (-not $ParentDir) {
     Write-Error "*** ERROR: Could not determine parent directory of '$ScriptDir'. Cannot proceed. ***"
     exit 1
 }
-$FinalDistPath = Join-Path $ParentDir $DistDirName # Final destination path in parent dir
-
-# --- Venv Executable Paths (will be set after venv creation) ---
+$FinalDistPath = Join-Path $ParentDir $DistDirName 
 $PythonExe = $null
 $PipExe = $null
 $PyInstallerExe = $null
 
-# --- Helper Function for Running Commands and Checking Errors (Automatic Version) ---
 function Invoke-CommandAndCheck {
     param(
         [Parameter(Mandatory=$true)]
@@ -96,7 +58,6 @@ function Invoke-CommandAndCheck {
     }
 }
 
-# --- Script Start ---
 Write-Host "`n=== Windows Setup Script (PowerShell Automatic) ===" -ForegroundColor Yellow
 
 #region 0.5. Clean Previous Build Output (in parent directory)
@@ -105,14 +66,11 @@ Write-Host "Checking for existing build output at: $FinalDistPath"
 if (Test-Path $FinalDistPath) {
     Write-Warning "WARNING: Found previous build output at '$FinalDistPath'. Attempting to remove it."
     try {
-        # Use -ErrorAction Stop here to ensure a clean state before proceeding
         Remove-Item -Path $FinalDistPath -Recurse -Force -ErrorAction Stop
         Write-Host "`t -> Previous build output removed successfully." -ForegroundColor Green
     } catch {
-        # If Remove-Item fails with ErrorAction Stop, the script halts automatically
-        # The error message from Remove-Item will be displayed due to $ErrorActionPreference = 'Stop'
-         Write-Error "*** ERROR: Failed to remove previous build output at '$FinalDistPath'. Check permissions or if files are in use. Error: $($_.Exception.Message) ***"
-         exit 1 # Explicit exit just in case
+        Write-Error "*** ERROR: Failed to remove previous build output at '$FinalDistPath'. Check permissions or if files are in use. Error: $($_.Exception.Message) ***"
+        exit 1 # Explicit exit just in case
     }
 } else {
     Write-Host "No previous build output found at '$FinalDistPath'."
@@ -218,7 +176,7 @@ $PyInstallerArgs = @(
     '--windowed',
     "--name=$BuildName",
     '--noconfirm',
-    "--distpath=$BuildDistDir" # Tell PyInstaller the output folder name/path directly
+    "--distpath=$BuildDistDir"
 )
 if (Test-Path $IconWin -PathType Leaf) {
     Write-Host "Adding icon: $IconWin"
@@ -274,15 +232,12 @@ if (Test-Path $SpecFile -PathType Leaf) {
 
 #region 11. Move Windows_dist Folder to Parent Level
 Write-Host "`n--- 11. Moving '$DistDirName' folder to parent level ---" -ForegroundColor Magenta
-# $ParentDir and $FinalDistPath were calculated and cleaned up in Region 0.5
 Write-Host "Final destination directory: $FinalDistPath"
 
-# Verify the source dist directory (created by PyInstaller in 'app') exists before trying to move
 if (-not (Test-Path $BuildDistDir -PathType Container)) {
     Write-Error "*** ERROR: Source folder '$BuildDistDir' created by PyInstaller not found for moving. ***"
 }
 
-# Move the newly built dist folder (no need to check destination, it was cleared in Region 0.5)
 Write-Host "Moving '$BuildDistDir' to '$ParentDir'..."
 try {
     Move-Item -Path $BuildDistDir -Destination $ParentDir -ErrorAction Stop
@@ -307,7 +262,6 @@ if (Test-Path $VenvDir -PathType Container) {
 }
 #endregion
 
-# Calculate final dist path again for the message just to be safe
 $FinalDistPathMsg = Join-Path $ParentDir $DistDirName
 
 Write-Host "`n=== Script finished successfully! ===" -ForegroundColor Yellow

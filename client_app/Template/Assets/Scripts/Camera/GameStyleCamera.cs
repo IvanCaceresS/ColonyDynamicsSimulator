@@ -18,7 +18,6 @@ public class GameStyleCamera : MonoBehaviour
     public float maxDistance = 200f;
     public float minHeight = 0.5f;
 
-    // Variables internas de cámara
     private float currentZoom;
     private float pitch;
     private float yaw;
@@ -72,10 +71,8 @@ public class GameStyleCamera : MonoBehaviour
 
     private void HandleRotation()
     {
-        // Solo rota mientras se mantiene presionado el botón derecho.
         if (Input.GetMouseButton(1))
         {
-            // Bloquea el cursor para un mejor control.
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;
 
@@ -89,7 +86,6 @@ public class GameStyleCamera : MonoBehaviour
         }
         else
         {
-            // Al soltar el botón derecho, restablece el cursor sin modificar los valores de yaw/pitch.
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
         }
@@ -135,13 +131,11 @@ public class GameStyleCamera : MonoBehaviour
     {
         if (isTopDownView)
         {
-            // Vuelve a la vista libre.
             transform.position = freeCameraPosition;
             transform.rotation = freeCameraRotation;
         }
         else
         {
-            // Guarda la posición actual y cambia a vista cenital.
             freeCameraPosition = transform.position;
             freeCameraRotation = transform.rotation;
             transform.position = topDownPosition;

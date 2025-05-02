@@ -12,7 +12,7 @@ public static class GameStateManager
     public static void CompleteSetup()
     {
         IsSetupComplete = true;
-        Debug.Log("GameStateManager: Setup completado, disparando evento.");
+        Debug.Log("GameStateManager: Setup complete, firing event.");
         OnSetupComplete?.Invoke();
     }
 
@@ -21,13 +21,13 @@ public static class GameStateManager
         IsSetupComplete = false;
         IsPaused = true;
         DeltaTime = 1.00f;
-        Debug.Log("GameStateManager: Reiniciando estado del juego.");
+        Debug.Log("GameStateManager: Resetting game state.");
     }
 
     public static void SetDeltaTime(float value)
     {
         DeltaTime = Mathf.Clamp(value, 0.01f, 99.99f);
-        Debug.Log($"GameStateManager: DeltaTime actualizado a {DeltaTime:F2}");
+        Debug.Log($"GameStateManager: DeltaTime updated to {DeltaTime:F2}");
     }
 
     public static void SetPauseState(bool pause)

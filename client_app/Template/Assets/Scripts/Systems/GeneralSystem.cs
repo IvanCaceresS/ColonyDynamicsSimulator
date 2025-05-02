@@ -14,16 +14,10 @@ public partial class GeneralSystem : SystemBase
 {
     protected override void OnUpdate()
     {
-        // Comprobamos el estado global
         if (!GameStateManager.IsSetupComplete || GameStateManager.IsPaused)
             return;
 
         float deltaTime = GameStateManager.DeltaTime;
-
-        // ---------------------------------------------------------------------
-        // PASO 1: Construir el NativeParallelHashMap de ParentData a partir de
-        // LocalTransform.
-        // ---------------------------------------------------------------------
         EntityQuery query = GetEntityQuery(typeof(LocalTransform));
         int capacity = math.max(1024, query.CalculateEntityCount() * 2);
         NativeParallelHashMap<Entity, ParentData> parentMap =
@@ -39,18 +33,13 @@ public partial class GeneralSystem : SystemBase
             });
         }).ScheduleParallel(Dependency);
 
-        // ---------------------------------------------------------------------
-        // PASO 2: Obtener el EntityCommandBuffer para postergar cambios.
-        // ---------------------------------------------------------------------
         EndSimulationEntityCommandBufferSystem ecbSystem =
             World.GetOrCreateSystemManaged<EndSimulationEntityCommandBufferSystem>();
         var ecb = ecbSystem.CreateCommandBuffer().AsParallelWriter();
         Dependency=Entities.WithReadOnly(parentMap).ForEach((Entity entity,int entityInQueryIndex,ref LocalTransform transform,ref GeneralComponent organism)=>
         {   
-            // Inicializar TimeReference solo una vez.
             if (!organism.TimeReferenceInitialized)
             {
-                // Creamos un generador de números aleatorios usando el índice (puedes ajustar el seed según necesites)
                 Unity.Mathematics.Random rng = new Unity.Mathematics.Random((uint)(entityInQueryIndex + 1) * 99999);
                 float randomMultiplier = rng.NextFloat(0.9f, 1.1f);
                 organism.TimeReference *= randomMultiplier;
@@ -67,15 +56,11 @@ public partial class GeneralSystem : SystemBase
 
 
 
-            // Actualizar componentes mediante el ECB.
+
             ecb.SetComponent(entityInQueryIndex, entity, transform);
             ecb.SetComponent(entityInQueryIndex, entity, organism);
         }).ScheduleParallel(Dependency);
         ecbSystem.AddJobHandleForProducer(Dependency);
-
-        // ---------------------------------------------------------------------
-        // PASO FINAL: Liberar el NativeParallelHashMap.
-        // ---------------------------------------------------------------------
         Dependency = parentMap.Dispose(Dependency);
     }
 }
