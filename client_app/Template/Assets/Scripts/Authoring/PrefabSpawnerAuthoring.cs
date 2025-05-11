@@ -11,7 +11,7 @@ class PrefabSpawnerBaker : Baker<PrefabSpawnerAuthoring>
         GameObject[] loadedPrefabs = Resources.LoadAll<GameObject>("Prefabs");
         if (loadedPrefabs.Length == 0)
         {
-            Debug.LogError("PrefabSpawnerAuthoring: No se encontraron prefabs en Resources/Prefabs.");
+            Debug.LogError("PrefabSpawnerAuthoring: No prefabs found in Resources/Prefabs.");
             return;
         }
         
@@ -22,7 +22,7 @@ class PrefabSpawnerBaker : Baker<PrefabSpawnerAuthoring>
             {
                 prefab = GetEntity(prefab, TransformUsageFlags.Dynamic)
             });
-            Debug.Log("PrefabSpawnerAuthoring: Entidad creada para " + prefab.name);
+            Debug.Log("PrefabSpawnerAuthoring: Entity created for " + prefab.name);
         }
     }
 }

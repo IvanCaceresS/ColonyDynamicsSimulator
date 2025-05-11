@@ -7,12 +7,6 @@ using System.Linq;
 
 public class Left_GUI : MonoBehaviour
 {
-    private const int GUIFontSize = 20;
-    private const int GUIWidth = 400;
-    private const int GUIHeight = 24;
-    private const int GUIXPosition = 10;
-    private const int GUIYPosition = 0;
-
     private float simulationStartTime = 0f;
     private float accumulatedRealTime = 0f;
     public float cachedRealTime = 0f;
@@ -21,12 +15,25 @@ public class Left_GUI : MonoBehaviour
     public int cachedFrameCount = 0;
     private bool hasStartedSimulation = false;
 
-
     public Dictionary<string, int> entityCounts = new Dictionary<string, int>();
     public List<Type> validComponentTypes = new List<Type>();
     private Dictionary<Type, EntityQuery> entityQueries = new Dictionary<Type, EntityQuery>();
 
     private GUIStyle labelStyle;
+    private GUIStyle backgroundBoxStyle;
+    private bool stylesInitialized = false;
+
+    private int baseFontSize = 18;
+
+    private float referenceWidth = 1920f;
+    private float referenceHeight = 1080f;
+    private float scaleWidth;
+    private float scaleHeight;
+    private float generalScale;
+
+    private List<KeyValuePair<string, int>> sortedSpecificOrganisms;
+    private List<GUIContent> statLabelsContent;
+
 
     public IEnumerable<string> OrganismNames
     {
@@ -45,8 +52,11 @@ public class Left_GUI : MonoBehaviour
     {
         GameStateManager.OnSetupComplete += EnableGUI;
         this.enabled = false;
+        sortedSpecificOrganisms = new List<KeyValuePair<string, int>>();
+        statLabelsContent = new List<GUIContent>();
         CacheValidComponentTypes();
         ResetCachedValues();
+        CalculateScaleFactors();
     }
 
     void OnDestroy()
@@ -61,9 +71,15 @@ public class Left_GUI : MonoBehaviour
 
     private void EnableGUI()
     {
-        Debug.Log("Left_GUI: Activating GUI interface.");
         this.enabled = true;
         ResetCachedValues();
+    }
+
+    void CalculateScaleFactors()
+    {
+        scaleWidth = Screen.width / referenceWidth;
+        scaleHeight = Screen.height / referenceHeight;
+        generalScale = Mathf.Min(scaleWidth, scaleHeight);
     }
 
     void Update()
@@ -122,15 +138,20 @@ public class Left_GUI : MonoBehaviour
         cachedFPS = 0f;
         cachedFrameCount = 0;
         entityCounts.Clear();
+        sortedSpecificOrganisms.Clear();
     }
 
     private void UpdateEntityCounts()
     {
         if (World.DefaultGameObjectInjectionWorld == null || !World.DefaultGameObjectInjectionWorld.IsCreated)
         {
-             entityCounts.Clear();
-             entityCounts["Organism count"] = 0;
-             return;
+            entityCounts.Clear();
+            if (entityCounts.ContainsKey("Organism count"))
+                 entityCounts["Organism count"] = 0;
+            else
+                entityCounts.Add("Organism count", 0);
+            sortedSpecificOrganisms.Clear();
+            return;
         }
         var entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
         if (entityManager == null) return;
@@ -147,25 +168,29 @@ public class Left_GUI : MonoBehaviour
                 currentCounts[name] = count;
                 totalEntities += count;
             }
-            catch (InvalidOperationException ex)
-            {
-                 Debug.LogError($"Left_GUI: Error calculating entity count for {kvp.Key.Name}: {ex.Message}");
-            }
-             catch (Exception ex)
-             {
-                 Debug.LogError($"Left_GUI: Unexpected error calculating entity count for {kvp.Key.Name}: {ex.Message}\n{ex.StackTrace}");
-             }
+            catch (ObjectDisposedException) { }
+            catch (InvalidOperationException) { }
+            catch (Exception) { }
         }
         currentCounts["Organism count"] = totalEntities;
         entityCounts = currentCounts;
+
+        sortedSpecificOrganisms.Clear();
+        foreach (var pair in entityCounts)
+        {
+            if (pair.Key != "Organism count")
+            {
+                sortedSpecificOrganisms.Add(pair);
+            }
+        }
+        sortedSpecificOrganisms.Sort((pair1, pair2) => pair1.Key.CompareTo(pair2.Key));
     }
 
     private void CacheValidComponentTypes()
     {
         if (World.DefaultGameObjectInjectionWorld == null || !World.DefaultGameObjectInjectionWorld.IsCreated)
         {
-             Debug.LogWarning("Left_GUI: World not ready for caching component types.");
-             return;
+            return;
         }
         var entityManager = World.DefaultGameObjectInjectionWorld.EntityManager;
         if (entityManager == null) return;
@@ -184,7 +209,7 @@ public class Left_GUI : MonoBehaviour
                 if (type.IsValueType && !type.IsAbstract && !type.IsGenericTypeDefinition && typeof(IComponentData).IsAssignableFrom(type))
                 {
                     string typeName = type.Name;
-                    if (typeName.EndsWith("Component") && typeName != "PrefabEntityComponent" && typeName != "PlaneComponent")
+                    if (typeName.EndsWith("Component") && typeName != "PrefabEntityComponent" && typeName != "PlaneComponent" && typeName != "Disabled" && typeName != "SceneSection")
                     {
                         validComponentTypes.Add(type);
                         var query = entityManager.CreateEntityQuery(ComponentType.ReadOnly(type));
@@ -193,24 +218,53 @@ public class Left_GUI : MonoBehaviour
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception) { }
+    }
+    
+    private Texture2D MakeTex(int width, int height, Color col)
+    {
+        Color[] pix = new Color[width * height];
+        for (int i = 0; i < pix.Length; ++i)
         {
-             Debug.LogError($"Left_GUI: Error during component type caching: {ex.Message}\n{ex.StackTrace}");
+            pix[i] = col;
         }
-         Debug.Log($"Left_GUI: Finished caching component types. Found {validComponentTypes.Count} valid types.");
+        Texture2D result = new Texture2D(width, height);
+        result.SetPixels(pix);
+        result.Apply();
+        return result;
+    }
+
+    private void InitializeStyles()
+    {
+        int scaledFontSize = Mathf.RoundToInt(baseFontSize * scaleHeight);
+        scaledFontSize = Mathf.Max(scaledFontSize, 10);
+
+        labelStyle = new GUIStyle(GUI.skin.label)
+        {
+            fontSize = scaledFontSize,
+            normal = { textColor = Color.white },
+            alignment = TextAnchor.MiddleLeft
+        };
+
+        backgroundBoxStyle = new GUIStyle(GUI.skin.box);
+        backgroundBoxStyle.normal.background = MakeTex(1, 1, new Color(0.05f, 0.05f, 0.05f, 0.75f));
+        backgroundBoxStyle.padding = new RectOffset(Mathf.RoundToInt(8 * scaleWidth), Mathf.RoundToInt(8 * scaleWidth), Mathf.RoundToInt(8 * scaleHeight), Mathf.RoundToInt(8 * scaleHeight));
+
+
+        stylesInitialized = true;
     }
 
     void OnGUI()
     {
-        if (labelStyle == null)
+        CalculateScaleFactors();
+
+        if (!stylesInitialized || Event.current.type == EventType.Layout)
         {
-            labelStyle = new GUIStyle(GUI.skin.label)
-            {
-                fontSize = GUIFontSize,
-                normal = { textColor = Color.white },
-                alignment = TextAnchor.MiddleLeft
-            };
+            InitializeStyles();
         }
+        
+        if (labelStyle == null || backgroundBoxStyle == null) return;
+
 
         if (!GameStateManager.IsSetupComplete) return;
 
@@ -218,51 +272,73 @@ public class Left_GUI : MonoBehaviour
     }
 
     private void DisplaySimulationStats()
-{
-    int y = GUIYPosition + 5;
-
-    GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"FPS: {cachedFPS:F2}", labelStyle); y += GUIHeight;
-    //GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Real Time: {FormatTime(cachedRealTime)}", labelStyle); y += GUIHeight;
-    GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Simulated Time: {FormatTime(cachedSimulatedTime)}", labelStyle); y += GUIHeight;
-
-    float timeMultiplier = GameStateManager.DeltaTime * 60f;
-    string multiplierText = hasStartedSimulation ? $"{timeMultiplier:F2}x" : "N/A";
-
-    GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Time Multiplier: {multiplierText}", labelStyle); y += GUIHeight; // Considerar usar GameStateManager.TimeMultiplier si existe
-    //GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"DeltaTime: {GameStateManager.DeltaTime:F4}", labelStyle); y += GUIHeight;
-    //GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Elapsed Frames: {cachedFrameCount}", labelStyle); y += GUIHeight;
-    //GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"Paused: {(GameStateManager.IsPaused ? "Yes" : "No")}", labelStyle); y += GUIHeight;
-
-    y += 5;
-    GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), "--- Entities ---", labelStyle); y += GUIHeight;
-
-
-    KeyValuePair<string, int> organismCountEntry = default;
-    bool hasOrganismCount = false;
-    if (entityCounts.TryGetValue("Organism count", out int totalCount))
     {
-        organismCountEntry = new KeyValuePair<string, int>("Organism count", totalCount);
-        hasOrganismCount = true;
+        float scaledXPosition = Mathf.RoundToInt(10 * scaleWidth);
+        float scaledYPositionBase = Mathf.RoundToInt(10 * scaleHeight);
+        float scaledLineHeight = Mathf.RoundToInt( (baseFontSize + 8) * scaleHeight);
+        scaledLineHeight = Mathf.Max(scaledLineHeight, 20);
+
+        statLabelsContent.Clear();
+        statLabelsContent.Add(new GUIContent($"FPS: {cachedFPS:F2}"));
+        statLabelsContent.Add(new GUIContent($"Simulated Time: {FormatTime(cachedSimulatedTime)}"));
+        float timeMultiplier = GameStateManager.DeltaTime * 60f;
+        string multiplierText = hasStartedSimulation ? $"{timeMultiplier:F2}x" : "N/A";
+        statLabelsContent.Add(new GUIContent($"Time Multiplier: {multiplierText}"));
+        statLabelsContent.Add(new GUIContent("--- Entities ---"));
+
+        foreach (var entry in sortedSpecificOrganisms)
+        {
+            statLabelsContent.Add(new GUIContent($"{entry.Key}: {entry.Value}"));
+        }
+        if (entityCounts.TryGetValue("Organism count", out int totalCount))
+        {
+            statLabelsContent.Add(new GUIContent($"Organism count: {totalCount}"));
+        }
+
+        float calculatedMaxWidthFromText = 0f;
+        float textWidthBuffer = 10f; 
+
+        if (labelStyle != null) {
+            foreach (var content in statLabelsContent)
+            {
+                Vector2 size = labelStyle.CalcSize(content);
+                if (size.x > calculatedMaxWidthFromText)
+                {
+                    calculatedMaxWidthFromText = size.x;
+                }
+            }
+        }
+        calculatedMaxWidthFromText += textWidthBuffer; 
+        
+        float boxMinimumWidth = Mathf.RoundToInt(250 * scaleWidth);
+        float effectiveContentWidth = Mathf.Max(calculatedMaxWidthFromText, boxMinimumWidth);
+
+
+        int numLines = statLabelsContent.Count;
+        float sectionSpacing = Mathf.RoundToInt(6 * scaleHeight);
+        float totalContentHeight = (numLines * scaledLineHeight) + sectionSpacing + backgroundBoxStyle.padding.top + backgroundBoxStyle.padding.bottom;
+        
+        Rect backgroundRect = new Rect(
+            scaledXPosition, 
+            scaledYPositionBase, 
+            effectiveContentWidth + backgroundBoxStyle.padding.left + backgroundBoxStyle.padding.right, 
+            totalContentHeight
+        );
+        GUI.Box(backgroundRect, GUIContent.none, backgroundBoxStyle);
+
+        int y = Mathf.RoundToInt(scaledYPositionBase + backgroundBoxStyle.padding.top);
+        float currentX = scaledXPosition + backgroundBoxStyle.padding.left;
+
+        for(int i = 0; i < statLabelsContent.Count; i++)
+        {
+            GUI.Label(new Rect(currentX, y, effectiveContentWidth, scaledLineHeight), statLabelsContent[i], labelStyle);
+            y += Mathf.RoundToInt(scaledLineHeight);
+            if (statLabelsContent[i].text == "--- Entities ---")
+            {
+                y += Mathf.RoundToInt(sectionSpacing / 2);
+            }
+        }
     }
-
-    List<KeyValuePair<string, int>> specificOrganisms = entityCounts
-        .Where(pair => pair.Key != "Organism count")
-        .ToList();
-
-    specificOrganisms.Sort((pair1, pair2) => pair1.Key.CompareTo(pair2.Key));
-
-    foreach (var entry in specificOrganisms)
-    {
-        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"{entry.Key}: {entry.Value}", labelStyle);
-        y += GUIHeight;
-    }
-
-    if (hasOrganismCount)
-    {
-        GUI.Label(new Rect(GUIXPosition, y, GUIWidth, GUIHeight), $"{organismCountEntry.Key}: {organismCountEntry.Value}", labelStyle);
-        y += GUIHeight;
-    }
-}
 
     private string FormatTime(float timeInSeconds)
     {
