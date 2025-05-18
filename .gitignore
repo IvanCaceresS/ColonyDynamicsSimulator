@@ -3,3 +3,5 @@ server_app/Responses
 client_app/Simulations
 client_app/.venv
 client_app/dist
+Windows_dist
+Mac_dist

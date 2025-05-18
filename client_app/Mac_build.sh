@@ -1,16 +1,6 @@
-#!/bin/bash
-
-# Mac_build.sh
-# Builds the macOS application using py2app and copies necessary data files alongside.
-
-# Exit immediately if a command exits with a non-zero status.
 set -e
-# Treat unset variables as an error when substituting.
-# set -u # Uncomment if you want stricter variable checks
-# Prevent errors in pipelines from being masked.
 set -o pipefail
 
-# --- Configuration ---
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 echo "Script directory: $SCRIPT_DIR"
 
@@ -29,7 +19,7 @@ SETUP_PATH="$SCRIPT_DIR/$SETUP_FILE"
 PARENT_DIR=$(dirname "$SCRIPT_DIR")
 FINAL_DIST_PATH="$PARENT_DIR/$DIST_DIR_NAME" # Final location for the built app bundle structure
 
-# Define ANSI colors for output messages (Optional)
+# Define ANSI colors for output messages
 COLOR_RESET='\033[0m'
 COLOR_RED='\033[0;31m'
 COLOR_GREEN='\033[0;32m'
@@ -155,7 +145,7 @@ if [ ! -d "$PY2APP_OUTPUT_DIR/$APP_NAME.app" ]; then
      log_error_exit "Application bundle '$APP_NAME.app' not found inside '$PY2APP_OUTPUT_DIR'."
 fi
 log_success
-cd - > /dev/null # Go back to previous directory (optional)
+cd - > /dev/null
 #endregion
 
 #region 8 Cleanup Intermediate Files (build folder)
@@ -190,7 +180,7 @@ echo "Removing temporary py2app output directory: $PY2APP_OUTPUT_DIR"
 rm -rf "$PY2APP_OUTPUT_DIR" || log_warning "Could not remove temporary py2app output directory '$PY2APP_OUTPUT_DIR'."
 #endregion
 
-#region 9.5 Copy Additional Items Alongside .app Bundle <<< ADDED REGION
+#region 9.5 Copy Additional Items Alongside .app Bundle
 log_step "9.5 Copying additional items to '$FINAL_DIST_PATH'"
 
 for ITEM_NAME in "${ITEMS_TO_COPY_REL[@]}"; do
@@ -212,11 +202,41 @@ for ITEM_NAME in "${ITEMS_TO_COPY_REL[@]}"; do
 done
 #endregion
 
+#region 9.6 Create and Setup Relative Alias Launcher
+log_step "9.6 Creating and setting up relative Alias launcher"
+ALIAS_NAME="SimulationManagerLauncher"
+TARGET_BINARY_PATH="$FINAL_DIST_PATH/$APP_NAME.app/Contents/MacOS/$APP_NAME"
+ALIAS_DEST_PATH="$FINAL_DIST_PATH"
+
+if [ -f "$TARGET_BINARY_PATH" ]; then
+    echo "Target binary found: $TARGET_BINARY_PATH"
+    echo "Creating Alias named '$ALIAS_NAME' in '$ALIAS_DEST_PATH'..."
+
+    osascript_command="tell application \"Finder\"
+        set targetFile to POSIX file \"$TARGET_BINARY_PATH\"
+        set destinationFolder to POSIX file \"$ALIAS_DEST_PATH\"
+        set newAlias to make new alias file to targetFile at destinationFolder
+        set name of newAlias to \"$ALIAS_NAME\"
+    end tell"
+
+    if osascript -e "$osascript_command"; then
+        if [ -e "$ALIAS_DEST_PATH/$ALIAS_NAME" ]; then
+            log_success "Alias '$ALIAS_NAME' created successfully in '$ALIAS_DEST_PATH'."
+        else
+            log_warning "Alias '$ALIAS_NAME' might have been created, but verification of exact name failed. Please check '$ALIAS_DEST_PATH'."
+        fi
+    else
+        log_warning "osascript command to create Alias failed. The Alias might not have been created."
+    fi
+else
+    log_warning "Target binary '$TARGET_BINARY_PATH' not found. Skipping Alias creation."
+fi
+#endregion
+
 #region 10 Final Virtual Environment Cleanup
 log_step "10 Final Virtual Environment Cleanup"
 if [ -d "$VENV_DIR" ]; then
     echo "Removing virtual environment: $VENV_DIR"
-    # Deactivate before removing
     [[ "$VIRTUAL_ENV" != "" ]] && deactivate
     rm -rf "$VENV_DIR" || log_warning "Could not completely remove virtual environment '$VENV_DIR'. You may need to remove it manually."
     echo -e "${COLOR_GREEN}\t -> Virtual environment removed.${COLOR_RESET}"
