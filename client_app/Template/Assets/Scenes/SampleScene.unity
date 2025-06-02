@@ -290,7 +290,7 @@ Camera:
     width: 1
     height: 1
   near clip plane: 0.3
-  far clip plane: 1000
+  far clip plane: 1900
   field of view: 60
   orthographic: 0
   orthographic size: 5
@@ -318,7 +318,7 @@ Transform:
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
   m_LocalRotation: {x: 0.7071068, y: 0, z: 0, w: 0.7071068}
-  m_LocalPosition: {x: 0, y: 75, z: 0}
+  m_LocalPosition: {x: 0, y: 150, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -380,14 +380,18 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 36e9f50f30f85964c888e1e0285aa99d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  moveSpeed: 20
-  verticalSpeed: 20
+  moveSpeed: 200
+  verticalSpeed: 200
+  moveSmoothTime: 0.1
   rotationSpeed: 200
-  zoomSpeed: 5
+  rotationSmoothTime: 0.05
+  zoomSpeed: 15
   minZoom: 5
   maxZoom: 60
-  maxDistance: 200
+  zoomSmoothTime: 0.1
+  maxDistance: 950
   minHeight: 0.5
+  backgroundColor: {r: 0.7607843, g: 0.85490197, b: 1, a: 1}
 --- !u!1 &410087039
 GameObject:
   m_ObjectHideFlags: 0
@@ -717,6 +721,18 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9e572d7ac8153574e856a4e4995235d2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  eColiPrefabName: EColi
+  sCerevisiaePrefabName: SCerevisiae
+  initialNumberOfEColi: 50
+  initialNumberOfSCerevisiae: 30
+  initialEColiColonyRadius: 10
+  initialSCerevisiaeColonyRadius: 20
+  overallPlacementRadius: 50
+  minColonySeparation: 40
+  groundLevelY: 0.5
+  maxPlacementDistanceFromOrigin: 900
+  spawnerWaitTimeout: 10
+  spawnerCheckInterval: 0.5
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

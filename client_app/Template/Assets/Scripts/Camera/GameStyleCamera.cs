@@ -3,8 +3,8 @@ using UnityEngine;
 public class GameStyleCamera : MonoBehaviour
 {
     [Header("Movimiento")]
-    public float moveSpeed = 20f;
-    public float verticalSpeed = 20f;
+    public float moveSpeed = 200f;
+    public float verticalSpeed = 200f;
     public float moveSmoothTime = 0.1f;
 
     [Header("Rotación")]
@@ -18,7 +18,7 @@ public class GameStyleCamera : MonoBehaviour
     public float zoomSmoothTime = 0.1f;
 
     [Header("Restricciones")]
-    public float maxDistance = 200f;
+    public float maxDistance = 950f;
     public float minHeight = 0.5f;
 
     [Header("Apariencia")]
@@ -40,7 +40,7 @@ public class GameStyleCamera : MonoBehaviour
     private Quaternion freeCameraSmoothedRotation;
     private float freeCameraTargetDesiredFOV;
 
-    private readonly Vector3 topDownPosition = new Vector3(0, 250, 0);
+    private readonly Vector3 topDownPosition = new Vector3(0, 950, 0);
     private readonly Quaternion topDownRotation = Quaternion.Euler(90, 0, 0);
     private bool isTopDownView = false;
     

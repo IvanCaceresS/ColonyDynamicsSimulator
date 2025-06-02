@@ -1,87 +1,87 @@
 #!/bin/bash
 
 # --- Script Configuration ---
-VENV_DIR=".venv"
-REQUIREMENTS_FILE="./requirements.txt"
-API_SCRIPT="./api.py"
+IMAGE_NAME="unity_sim_api_server"
+DOCKERFILE_PATH="." # Assumes Dockerfile is in the same directory as this script (server_app)
+ENV_FILE="./api.env" # Path to your .env file, expected in the same directory
 
 # --- Function to handle errors and exit ---
 handle_error() {
     echo "Error on line $1: $2"
+    echo "Script aborted."
     exit 1
 }
 
 # Trap errors and call the handler
 trap 'handle_error ${LINENO} "${BASH_COMMAND}"' ERR
 
-echo "Starting setup and execution script..."
+echo "🚀 Starting Docker setup and execution script for the API server..."
 
-# --- 1. Check for Python3 ---
-if ! command -v python3 &> /dev/null; then
-    echo "Error: Python3 is not installed or not found in PATH."
-    echo "Please install Python3 and ensure it's accessible from your terminal."
+# --- 1. Check for Docker ---
+if ! command -v docker &> /dev/null; then
+    echo "❌ Error: Docker is not installed or not found in PATH."
+    echo "Please install Docker and ensure it's accessible from your terminal."
     exit 1
 fi
-echo "Python3 found."
+echo "✅ Docker found."
 
-# --- 2. Create Virtual Environment ---
-if [ -d "$VENV_DIR" ]; then
-    echo "Virtual environment '$VENV_DIR' already exists. Skipping creation."
-else
-    echo "Creating virtual environment '$VENV_DIR'..."
-    python3 -m venv "$VENV_DIR"
-    echo "Virtual environment created."
-fi
-
-# --- 3. Determine Activation Script Path based on OS ---
-VENV_ACTIVATE=""
-case "$OSTYPE" in
-    linux*)
-        # Linux (Ubuntu, WSL)
-        VENV_ACTIVATE="$VENV_DIR/bin/activate"
-        ;;
-    msys*|mingw*)
-        # Windows (Git Bash)
-        VENV_ACTIVATE="$VENV_DIR/Scripts/activate"
-        ;;
-    *)
-        echo "Warning: Unknown OS type '$OSTYPE'. Assuming Linux-like activation path."
-        VENV_ACTIVATE="$VENV_DIR/bin/activate"
-        ;;
-esac
-
-# Check if the determined activation script exists
-if [ ! -f "$VENV_ACTIVATE" ]; then
-    echo "Error: Could not find virtual environment activation script at '$VENV_ACTIVATE'."
-    echo "Please check the '$VENV_DIR' directory structure."
+# --- 2. Check for .env file ---
+if [ ! -f "$ENV_FILE" ]; then
+    echo "❌ CRITICAL ERROR: '$ENV_FILE' not found in the current directory ($(pwd))."
+    echo "This file is required by the application (api.py) to load API keys and other configurations."
+    echo "Please create '$ENV_FILE' in the same directory as this script."
+    echo "Example content for api.env:"
+    echo "------------------------------------"
+    echo "OPENAI_API_KEY=your_openai_key_here"
+    echo "FINE_TUNED_MODEL_NAME=your_primary_model_name_here"
+    echo "2ND_FINE_TUNED_MODEL_NAME=your_secondary_model_name_here"
+    echo "API_SERVER_KEY=your_chosen_api_server_key_here"
+    echo "FLASK_RUN_PORT=5000"
+    echo "------------------------------------"
     exit 1
 fi
-echo "Activation script found at '$VENV_ACTIVATE'."
+echo "✅ '$ENV_FILE' found."
 
+# --- 3. Build Docker Image ---
+echo "🛠️ Building Docker image '$IMAGE_NAME' from Dockerfile in '$DOCKERFILE_PATH'..."
+# The Dockerfile copies all files from the build context ('.') into the image.
+# This ensures api.env is included in the image for api.py to use.
+docker build -t "$IMAGE_NAME" "$DOCKERFILE_PATH"
+echo "✅ Docker image '$IMAGE_NAME' built successfully."
 
-# --- 4. Activate Virtual Environment ---
-echo "Activating virtual environment..."
-source "$VENV_ACTIVATE"
-echo "Virtual environment activated."
-echo "Using Python3 from: $(command -v python3)"
+# --- 4. Run Docker Container ---
+# Determine the application port from api.env, default to 5000 if not set
+# api.py uses os.getenv("FLASK_RUN_PORT", 5000)
+APP_PORT=$(grep FLASK_RUN_PORT "$ENV_FILE" | cut -d '=' -f2 | tr -d '[:space:]')
+APP_PORT=${APP_PORT:-5000} # Default to 5000 if not found or empty
 
-# --- 5. Install Requirements ---
-if [ -f "$REQUIREMENTS_FILE" ]; then
-    echo "Installing dependencies from '$REQUIREMENTS_FILE'..."
-    pip install -r "$REQUIREMENTS_FILE"
-    echo "Dependencies installed."
-else
-    echo "Warning: '$REQUIREMENTS_FILE' not found. Skipping dependency installation."
+CONTAINER_NAME="${IMAGE_NAME}_container"
+
+# Stop and remove if container with the same name already exists
+if [ "$(docker ps -q -f name=^/${CONTAINER_NAME}$)" ]; then
+    echo "🔄 Stopping existing container '$CONTAINER_NAME'..."
+    docker stop "$CONTAINER_NAME" > /dev/null
+fi
+if [ "$(docker ps -aq -f status=exited -f name=^/${CONTAINER_NAME}$)" ]; then
+    echo "🗑️ Removing existing container '$CONTAINER_NAME'..."
+    docker rm "$CONTAINER_NAME" > /dev/null
 fi
 
-# --- 6. Execute API Script ---
-if [ -f "$API_SCRIPT" ]; then
-    echo "Executing script '$API_SCRIPT'..."
-    python3 "$API_SCRIPT"
-    echo "Script execution finished."
-else
-    echo "Error: API script '$API_SCRIPT' not found."
-    exit 1
-fi
+echo "🏃 Running Docker container '$IMAGE_NAME' as '$CONTAINER_NAME'..."
+echo "   Container will run in detached mode (-d)."
+echo "   Host port $APP_PORT will be mapped to container port $APP_PORT."
+echo "   The application inside the container will use configuration from the copied 'api.env'."
 
-echo "Script finished successfully."
+# Run in detached mode (-d)
+# Use --rm to automatically remove the container when it exits/stops.
+# Map the host port to the container port.
+docker run -d --rm \
+    -p "${APP_PORT}:${APP_PORT}" \
+    --name "$CONTAINER_NAME" \
+    "$IMAGE_NAME"
+
+echo "✅ Docker container '$CONTAINER_NAME' is starting."
+echo "   Application should be accessible at http://localhost:${APP_PORT}"
+echo "   To view logs: docker logs -f ${CONTAINER_NAME}"
+echo "   To stop the container: docker stop ${CONTAINER_NAME}"
+echo "🎉 Script finished."
