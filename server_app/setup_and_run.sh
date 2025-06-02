@@ -1,11 +1,7 @@
 #!/bin/bash
 
-# --- Script Configuration ---
-IMAGE_NAME="unity_sim_api_server"
-DOCKERFILE_PATH="." # Assumes Dockerfile is in the same directory as this script (server_app)
-ENV_FILE="./api.env" # Path to your .env file, expected in the same directory
-
 # --- Function to handle errors and exit ---
+# This should be defined early so it's available for all subsequent commands.
 handle_error() {
     echo "❌ Error on line $1: $2"
     echo "Script aborted."
@@ -13,9 +9,11 @@ handle_error() {
 }
 
 # Trap errors and call the handler
+# This should also be set early.
 trap 'handle_error ${LINENO} "${BASH_COMMAND}"' ERR
 
 # --- 1. Ensure script is run with sudo ---
+# This is now one of the very first operational checks.
 if [ "$EUID" -ne 0 ]; then
   echo "🔒 This script needs to be run with sudo privileges for Docker installation and management."
   echo "   Attempting to re-run with sudo..."
@@ -25,6 +23,11 @@ if [ "$EUID" -ne 0 ]; then
   exit $?
 fi
 echo "✅ Script is running with sudo privileges."
+
+# --- Script Configuration ---
+IMAGE_NAME="unity_sim_api_server"
+DOCKERFILE_PATH="." # Assumes Dockerfile is in the same directory as this script (server_app)
+ENV_FILE="./api.env" # Path to your .env file, expected in the same directory
 
 # --- Function to install Docker if not present ---
 install_docker_if_needed() {
@@ -95,6 +98,7 @@ install_docker_if_needed() {
 echo "🚀 Starting Docker setup and execution script for the API server..."
 
 # --- 2. Install Docker if needed ---
+# (The sudo check is now step 1, so this effectively becomes step 2 of operations)
 install_docker_if_needed
 
 # --- 3. Check for .env file ---
