@@ -464,6 +464,7 @@ def separar_codigos_por_archivo(respuesta: str) -> dict:
     codigos = {}
     for _, archivo, contenido in patrones:
         codigos[archivo] = format_csharp(contenido.strip())
+        #codigos[archivo] = contenido
     return codigos
 
 def format_csharp(contenido: str) -> str:
@@ -482,123 +483,136 @@ def format_csharp(contenido: str) -> str:
             nivel_indentacion += 1
     return "\n".join(contenido_formateado)
 
+def _insert_code_between_markers(template_content: str, code_to_insert: str) -> Union[str, None]: # Changed to Union[str, None]
+    start_marker = "//CODE START"
+    end_marker = "//CODE END"
+
+    start_marker_idx = template_content.find(start_marker)
+    if start_marker_idx == -1:
+        return None
+
+    end_marker_idx = template_content.find(end_marker, start_marker_idx + len(start_marker))
+    if end_marker_idx == -1:
+        return None
+    
+    head = template_content[:start_marker_idx + len(start_marker)]
+    tail = template_content[end_marker_idx:]
+    
+    return f"{head}\n{code_to_insert}\n{tail}"
+
 def import_codes(codes: dict, simulation_name: str) -> bool:
     base_dir = os.getcwd()
     simulation_folder = os.path.join(base_dir, "Simulations", simulation_name)
+
     if os.path.exists(simulation_folder):
-        if os.path.isdir(simulation_folder):
-             pass
-        else:
-             return False
+        if not os.path.isdir(simulation_folder):
+            return False
+    
     template_folder = os.path.join(base_dir, "Template")
     if not os.path.exists(template_folder) or not os.path.isdir(template_folder):
-         return False
+        return False
+
     try:
         if not os.path.exists(simulation_folder):
             shutil.copytree(template_folder, simulation_folder)
-        else:
-            pass
     except Exception as e:
         return False
+
     assets_editor_folder = os.path.join(simulation_folder, "Assets", "Editor")
     assets_scripts_folder = os.path.join(simulation_folder, "Assets", "Scripts")
     assets_scripts_components = os.path.join(assets_scripts_folder, "Components")
     assets_scripts_systems = os.path.join(assets_scripts_folder, "Systems")
     assets_scripts_general = os.path.join(assets_scripts_folder, "General")
+
     os.makedirs(assets_editor_folder, exist_ok=True)
     os.makedirs(assets_scripts_components, exist_ok=True)
     os.makedirs(assets_scripts_systems, exist_ok=True)
     os.makedirs(assets_scripts_general, exist_ok=True)
+
     template_system_path = os.path.join(template_folder, "Assets", "Scripts", "Systems", "GeneralSystem.cs")
     if not os.path.exists(template_system_path):
         template_system_path = None
+
     template_create_path = os.path.join(template_folder, "Assets", "Scripts", "General", "CreatePrefabsOnClick.cs")
     if not os.path.exists(template_create_path):
         template_create_path = None
+        
+    template_prefab_creator_path = os.path.join(template_folder, "Assets", "Editor", "PrefabMaterialCreator.cs")
+    if not os.path.exists(template_prefab_creator_path):
+        template_prefab_creator_path = None
+
     files_processed = []
     for file_name, content in codes.items():
-        dest_path = ""
+        dest_path = "" 
         new_content = content
+
         try:
             if file_name == "PrefabMaterialCreator.cs":
                 dest_path = os.path.join(assets_editor_folder, file_name)
-                new_content = (
-                    "#if UNITY_EDITOR\n"
-                    "using UnityEngine;\n"
-                    "using UnityEditor;\n"
-                    "using System.IO;\n\n"
-                    f"{content}\n"
-                    "#endif\n"
-                )
+                if template_prefab_creator_path:
+                    try:
+                        with open(template_prefab_creator_path, "r", encoding="utf-8") as f_template:
+                            template_text = f_template.read()
+                        processed_template = _insert_code_between_markers(template_text, content)
+                        if processed_template is not None:
+                            new_content = processed_template
+                    except Exception:
+                        pass 
             elif "Component.cs" in file_name:
                 dest_path = os.path.join(assets_scripts_components, file_name)
             elif "System.cs" in file_name:
                 dest_path = os.path.join(assets_scripts_systems, file_name)
                 if template_system_path:
                     try:
-                        with open(template_system_path, "r", encoding="utf-8") as f:
-                            template_lines = f.readlines()
+                        with open(template_system_path, "r", encoding="utf-8") as f_template:
+                            template_text = f_template.read()
+                        
                         organism_name = file_name.replace("System.cs", "")
+                        class_name_to_replace = "GeneralSystem" 
+                        component_name_to_replace = "GeneralComponent"
+                        
                         new_class_declaration = f"public partial class {organism_name}System : SystemBase"
                         new_component_declaration = f"{organism_name}Component"
-                        temp_content = "".join(template_lines)
-                        temp_content = temp_content.replace("public partial class GeneralSystem : SystemBase", new_class_declaration)
-                        temp_content = temp_content.replace("GeneralComponent", new_component_declaration)
-                        template_lines = temp_content.splitlines(keepends=True)
-                        insertion_index = -1
-                        target_line_content = "transform.Scale=math.lerp(initialScale,maxScale,t);}"
-                        for i, line in enumerate(template_lines):
-                             if target_line_content in line.replace(" ", "").replace("\t", ""):
-                                 insertion_index = i
-                                 break
-                        if insertion_index != -1:
-                            template_lines.insert(insertion_index + 1, "\n" + content + "\n")
-                            new_content = "".join(template_lines)
-                        else:
-                            new_content = content
-                    except Exception as e:
-                        new_content = content
+                        
+                        modified_template_text = template_text.replace(f"public partial class {class_name_to_replace} : SystemBase", new_class_declaration)
+                        modified_template_text = modified_template_text.replace(component_name_to_replace, new_component_declaration)
+                        
+                        processed_template = _insert_code_between_markers(modified_template_text, content)
+                        if processed_template is not None:
+                            new_content = processed_template
+                    except Exception:
+                        pass
             elif file_name == "CreatePrefabsOnClick.cs":
-                 dest_path = os.path.join(assets_scripts_general, file_name)
-                 if template_create_path:
-                      try:
-                           with open(template_create_path, "r", encoding="utf-8") as f:
-                                template_lines = f.readlines()
-                           insertion_index = -1
-                           target_signature = "private void CargarPrefabs()"
-                           target_content_part = "Resources.LoadAll<GameObject>"
-                           for i, line in enumerate(template_lines):
-                                if target_signature in line and target_content_part in line:
-                                     insertion_index = i
-                                     break
-                           if insertion_index != -1:
-                                template_lines.insert(insertion_index + 1, "\n" + content + "\n")
-                                new_content = "".join(template_lines)
-                           else:
-                                new_content = content
-                      except Exception as e:
-                           new_content = content
+                dest_path = os.path.join(assets_scripts_general, file_name)
+                if template_create_path:
+                    try:
+                        with open(template_create_path, "r", encoding="utf-8") as f_template:
+                            template_text = f_template.read()
+                        
+                        processed_template = _insert_code_between_markers(template_text, content)
+                        if processed_template is not None:
+                            new_content = processed_template
+                    except Exception:
+                        pass
             else:
                 dest_path = os.path.join(assets_scripts_general, file_name)
+
             if dest_path:
                 os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                with open(dest_path, "w", encoding="utf-8") as f:
-                    f.write(new_content)
+                with open(dest_path, "w", encoding="utf-8") as f_out:
+                    f_out.write(new_content)
                 files_processed.append(dest_path)
-            else:
-                 pass
         except Exception as e:
             pass
+
     template_system_dest = os.path.join(assets_scripts_systems, "GeneralSystem.cs")
     if os.path.exists(template_system_dest):
         try:
             os.remove(template_system_dest)
         except Exception as e:
             pass
-    if files_processed:
-        return True
-    else:
-        return False
+
+    return bool(files_processed)
 
 DELIMITER = "%|%"
 
@@ -683,8 +697,10 @@ def get_cached_response(prompt: str) -> Union[str, None]:
     if not RESPONSES_CSV or not RESPONSES_CSV.exists():
         return None
     try:
+        print("Reading cached responses from:", RESPONSES_CSV)
         with open(RESPONSES_CSV, "r", encoding="utf-8") as f:
-             lines = f.readlines()
+            lines = f.readlines()
+            print(lines)
         clean_prompt_search = str(prompt).replace(DELIMITER, "<DELIM>").replace('\n', '\\n').replace('\r', '')
         for line in lines[1:]:
             line = line.strip()
@@ -699,9 +715,9 @@ def get_cached_response(prompt: str) -> Union[str, None]:
             else:
                 pass
     except FileNotFoundError:
-         return None
+        return None
     except Exception as e:
-         return None
+        return None
     return None
 
 def api_manager(sim_name: str, sim_desc: str, use_cache: bool = True) -> Tuple[bool, Union[str, None]]:
@@ -711,18 +727,20 @@ def api_manager(sim_name: str, sim_desc: str, use_cache: bool = True) -> Tuple[b
     if err_s:
         return False, f"Error en la llamada API (Modelo Validación): {err_s}"
     if not fmt_q:
-         return False, "Error del Modelo Validación: La API devolvió una respuesta vacía."
+        return False, "Error del Modelo Validación: La API devolvió una respuesta vacía."
     fmt_q_s = fmt_q.strip()
     if fmt_q_s == "ERROR DE CONTENIDO":
         return False, "Validación Fallida: La descripción contiene organismos o temas no permitidos. Solo EColi, SCerevisiae o ambos."
     if fmt_q_s == "ERROR CANTIDAD EXCEDIDA":
-         return False, "Validación Fallida: Se solicitó más de 2 organismos. Límite máximo: 2."
+        return False, "Validación Fallida: Se solicitó más de 2 organismos. Límite máximo: 2."
     if fmt_q_s.upper().startswith("ERROR"):
-         return False, f"Error del Modelo Validación: {fmt_q_s}"
+        return False, f"Error del Modelo Validación: {fmt_q_s}"
+    
     final_response: Optional[str] = None
     cache_hit = False
     total_tk_in = tk_is
     total_tk_out = tk_os
+    
     if use_cache:
         cached_response = get_cached_response(fmt_q)
         if cached_response:
@@ -737,20 +755,25 @@ def api_manager(sim_name: str, sim_desc: str, use_cache: bool = True) -> Tuple[b
         if "ERROR FORMATO" in prim_r.upper():
             return False, f"Error de Formato de Pregunta: El modelo de generación rechazó la pregunta formateada:\n'{fmt_q}'"
         final_response = prim_r
-        total_tk_in += tk_ip
+        total_tk_in += tk_ip 
         total_tk_out += tk_op
+        
         if use_cache and not cache_hit:
             write_response_to_csv(fmt_q, final_response, total_tk_in, total_tk_out)
+            
     if not final_response:
         return False, "Error Crítico: No se obtuvo una respuesta final válida (ni de caché ni generada)."
+        
     codes = separar_codigos_por_archivo(final_response)
     if not codes:
         return False, f"Error de Extracción: No se encontraron bloques de código C# válidos en la respuesta.\nInicio de respuesta recibida:\n{final_response[:800]}..."
+    
     ok_import = import_codes(codes, sim_name)
     if ok_import:
         return True, None
     else:
         return False, f"Error de Importación: Falló al guardar los scripts para la simulación '{sim_name}'. Por favor, revisa los logs para más detalles."
+
 
 def center_window(window, width, height):
     window.update_idletasks()
