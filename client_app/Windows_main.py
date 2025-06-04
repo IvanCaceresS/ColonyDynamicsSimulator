@@ -697,6 +697,8 @@ def api_manager(sim_name: str, sim_desc: str, use_cache: bool = True) -> Tuple[b
         return False, "Validation Failed: The description contains disallowed organisms or topics. Only EColi, SCerevisiae, or both are allowed."
     if fmt_q_s == "ERROR CANTIDAD EXCEDIDA":
         return False, "Validation Failed: More than 2 organisms were requested. Maximum limit: 2."
+    if fmt_q_s == "ERROR MORFOLOGIA NO ACEPTADA":
+        return False, "Validation Failed: The organism's morphology is not accepted or is not one of the allowed types (Bacilo, Cocco, Helicoide)."
     if fmt_q_s.upper().startswith("ERROR"):
         return False, f"Validation Model Error: {fmt_q_s}"
     final_response: Optional[str] = None

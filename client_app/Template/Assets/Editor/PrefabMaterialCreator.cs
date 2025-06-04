@@ -122,8 +122,7 @@ public static class PrefabMaterialCreator
         var sh = Shader.Find("Universal Render Pipeline/Lit");
         if (sh == null) { Debug.LogError($"Shader URP/Lit not found for {name}. Material will not be created."); Object.DestroyImmediate(HeliGO); return; }
         
-        Material matInstanceHeli = new Material(sh) { name = name + "_Material" };
-        matInstanceHeli.color = color;
+        Material matInstanceHeli = new Material(sh) { name = name + "_Material", color = color };
         if (!Directory.Exists(mF)) Directory.CreateDirectory(mF);
         string materialPathHeli = Path.Combine(mF, matInstanceHeli.name + ".mat");
         AssetDatabase.CreateAsset(matInstanceHeli, materialPathHeli);
