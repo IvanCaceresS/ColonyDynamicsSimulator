@@ -8,11 +8,11 @@ public class GameStyleCamera : MonoBehaviour
     public float moveSmoothTime = 0.1f;
 
     [Header("Rotación")]
-    public float rotationSpeed = 200f;
+    public float rotationSpeed = 20f; 
     public float rotationSmoothTime = 0.05f;
 
     [Header("Zoom")]
-    public float zoomSpeed = 15f; 
+    public float zoomSpeed = 15f;
     public float minZoom = 5f;
     public float maxZoom = 60f;
     public float zoomSmoothTime = 0.1f;
@@ -22,7 +22,7 @@ public class GameStyleCamera : MonoBehaviour
     public float minHeight = 0.5f;
 
     [Header("Apariencia")]
-    public Color backgroundColor = new Color(194f/255f, 218f/255f, 255f/255f, 1f); // #C2DAFF
+    public Color backgroundColor = new Color(194f / 255f, 218f / 255f, 255f / 255f, 1f);
 
     private float currentActualFOV;
     private float targetDesiredFOV;
@@ -43,7 +43,7 @@ public class GameStyleCamera : MonoBehaviour
     private readonly Vector3 topDownPosition = new Vector3(0, 950, 0);
     private readonly Quaternion topDownRotation = Quaternion.Euler(90, 0, 0);
     private bool isTopDownView = false;
-    
+
     private Vector3 initialPosition;
     private Quaternion initialRotation;
     private float initialTargetDesiredFOV;
@@ -55,7 +55,7 @@ public class GameStyleCamera : MonoBehaviour
     {
         initialPosition = transform.position;
         initialRotation = transform.rotation;
-        initialTargetDesiredFOV = maxZoom;
+        initialTargetDesiredFOV = maxZoom; 
 
         targetDesiredFOV = initialTargetDesiredFOV;
         if (Camera.main != null)
@@ -68,8 +68,8 @@ public class GameStyleCamera : MonoBehaviour
 
         currentYaw = initialRotation.eulerAngles.y;
         currentPitch = initialRotation.eulerAngles.x;
-        transform.rotation = initialRotation;
-        transform.position = initialPosition;
+        transform.rotation = initialRotation; 
+        transform.position = initialPosition; 
         
         freeCameraSmoothedPosition = initialPosition;
         freeCameraSmoothedRotation = initialRotation;
@@ -97,7 +97,7 @@ public class GameStyleCamera : MonoBehaviour
         if (Camera.main != null)
         {
             Camera.main.fieldOfView = initialTargetDesiredFOV;
-            Camera.main.backgroundColor = backgroundColor; // Re-apply on reset
+            Camera.main.backgroundColor = backgroundColor; 
         }
 
         currentYaw = initialRotation.eulerAngles.y;
@@ -109,7 +109,7 @@ public class GameStyleCamera : MonoBehaviour
         smoothedMoveInput = Vector3.zero;
         moveInputVelocity = Vector3.zero;
 
-        isTopDownView = false;
+        isTopDownView = false; 
 
         freeCameraSmoothedPosition = initialPosition;
         freeCameraSmoothedRotation = initialRotation;
@@ -127,14 +127,14 @@ public class GameStyleCamera : MonoBehaviour
 
         if (!isSetupNow)
         {
-            if (wasSetupCompletedLastFrame)
+            if (wasSetupCompletedLastFrame) 
             {
                 ResetCameraToInitialState();
             }
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;
         }
-        else
+        else 
         {
             if (canAcceptInputNow)
             {
@@ -147,7 +147,7 @@ public class GameStyleCamera : MonoBehaviour
                     yawVelocityRef = 0f;
                     pitchVelocityRef = 0f;
                     fovVelocityRef = 0f;
-                    moveInputVelocity = Vector3.zero;
+                    moveInputVelocity = Vector3.zero; 
                 }
 
                 if (Input.GetKeyDown(KeyCode.C))
@@ -161,7 +161,7 @@ public class GameStyleCamera : MonoBehaviour
                     HandleMovement();
                     HandleZoom();
                 }
-                else
+                else 
                 {
                     Cursor.lockState = CursorLockMode.None;
                     Cursor.visible = true;
@@ -173,6 +173,7 @@ public class GameStyleCamera : MonoBehaviour
                 Cursor.visible = true;
             }
         }
+
         wasSetupCompletedLastFrame = isSetupNow;
         wasAcceptingInputLastFrame = canAcceptInputNow;
     }
@@ -182,7 +183,7 @@ public class GameStyleCamera : MonoBehaviour
         float targetYaw = currentYaw;
         float targetPitch = currentPitch;
 
-        if (Input.GetMouseButton(1))
+        if (Input.GetMouseButton(1)) 
         {
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;
@@ -190,8 +191,9 @@ public class GameStyleCamera : MonoBehaviour
             float mouseX = Input.GetAxis("Mouse X") * rotationSpeed;
             float mouseY = Input.GetAxis("Mouse Y") * rotationSpeed;
 
-            targetYaw += mouseX * Time.deltaTime;
-            targetPitch -= mouseY * Time.deltaTime;
+            targetYaw += mouseX;
+            targetPitch -= mouseY;
+            
             targetPitch = Mathf.Clamp(targetPitch, -89f, 89f);
         }
         else
@@ -207,13 +209,23 @@ public class GameStyleCamera : MonoBehaviour
 
     private void HandleMovement()
     {
-        float horiz = Input.GetAxis("Horizontal");
-        float vert = Input.GetAxis("Vertical");
+        float horiz = Input.GetAxis("Horizontal"); 
+        float vert = Input.GetAxis("Vertical");   
         Vector3 rawInput = new Vector3(horiz, 0, vert);
+
         smoothedMoveInput = Vector3.SmoothDamp(smoothedMoveInput, rawInput, ref moveInputVelocity, moveSmoothTime);
 
         Vector3 move = transform.right * smoothedMoveInput.x + transform.forward * smoothedMoveInput.z;
-        move = move.normalized * new Vector2(smoothedMoveInput.x, smoothedMoveInput.z).magnitude;
+        
+        if (smoothedMoveInput.sqrMagnitude > 0.001f) 
+        {
+             move = move.normalized * new Vector2(smoothedMoveInput.x, smoothedMoveInput.z).magnitude;
+        }
+        else
+        {
+            move = Vector3.zero; 
+        }
+        
         move *= moveSpeed;
 
         if (Input.GetKey(KeyCode.Space))
@@ -222,20 +234,21 @@ public class GameStyleCamera : MonoBehaviour
             move.y -= verticalSpeed;
 
         transform.position += move * Time.deltaTime;
-        RestrictPosition();
+        RestrictPosition(); 
     }
 
     private void HandleZoom()
     {
         float scroll = Input.GetAxis("Mouse ScrollWheel");
-        if (scroll != 0)
+        if (scroll != 0) 
         {
             targetDesiredFOV = Mathf.Clamp(targetDesiredFOV - scroll * zoomSpeed, minZoom, maxZoom);
         }
+
         if (Camera.main != null)
         {
             currentActualFOV = Mathf.SmoothDamp(Camera.main.fieldOfView, targetDesiredFOV, ref fovVelocityRef, zoomSmoothTime);
-            Camera.main.fieldOfView = currentActualFOV;
+            Camera.main.fieldOfView = currentActualFOV; 
         }
     }
 
@@ -247,7 +260,7 @@ public class GameStyleCamera : MonoBehaviour
             pos = Vector3.zero + (pos - Vector3.zero).normalized * maxDistance;
         }
         pos.y = Mathf.Max(pos.y, minHeight);
-        transform.position = pos;
+        transform.position = pos; 
     }
 
     public void ToggleCameraMode()
@@ -262,7 +275,7 @@ public class GameStyleCamera : MonoBehaviour
 
             transform.position = topDownPosition;
             transform.rotation = topDownRotation;
-            
+
             currentYaw = topDownRotation.eulerAngles.y;
             currentPitch = topDownRotation.eulerAngles.x;
             
@@ -279,7 +292,7 @@ public class GameStyleCamera : MonoBehaviour
 
             currentYaw = freeCameraSmoothedRotation.eulerAngles.y;
             currentPitch = freeCameraSmoothedRotation.eulerAngles.x;
-            targetDesiredFOV = freeCameraTargetDesiredFOV;
+            targetDesiredFOV = freeCameraTargetDesiredFOV; 
             
             smoothedMoveInput = Vector3.zero;
             moveInputVelocity = Vector3.zero;

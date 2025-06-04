@@ -321,15 +321,29 @@ public class Right_GUI : MonoBehaviour
 
     private string GetTimeRelationshipText(float speedMultiplier)
     {
-        TimeSpan simulatedTimeSpan = TimeSpan.FromSeconds(speedMultiplier);
         StringBuilder timeString = new StringBuilder();
-        if (simulatedTimeSpan.TotalHours >= 1) { timeString.AppendFormat("{0} hour{1} ", (int)simulatedTimeSpan.TotalHours, (int)simulatedTimeSpan.TotalHours == 1 ? "" : "s"); }
-        if (simulatedTimeSpan.Minutes > 0 || timeString.Length > 0) { timeString.AppendFormat("{0} minute{1} ", simulatedTimeSpan.Minutes, simulatedTimeSpan.Minutes == 1 ? "" : "s"); }
-        if (timeString.Length == 0 || simulatedTimeSpan.Seconds > 0 || (simulatedTimeSpan.Minutes == 0 && simulatedTimeSpan.TotalHours < 1))
+        double totalSeconds = speedMultiplier;
+        int hours = (int)Math.Floor(totalSeconds / 3600);
+        totalSeconds -= hours * 3600;
+        int minutes = (int)Math.Floor(totalSeconds / 60);
+        double seconds = totalSeconds - (minutes * 60);
+
+        if (hours > 0)
         {
-            timeString.AppendFormat("{0} second{1}", simulatedTimeSpan.Seconds, simulatedTimeSpan.Seconds == 1 ? "" : "s");
+            timeString.AppendFormat("{0} hour{1} ", hours, hours == 1 ? "" : "s");
         }
-        if (timeString.Length == 0 && speedMultiplier == 0) { timeString.Append("0 seconds"); }
+        if (minutes > 0 || hours > 0)
+        {
+            timeString.AppendFormat("{0} minute{1} ", minutes, minutes == 1 ? "" : "s");
+        }
+        if (hours == 0 && minutes == 0 || seconds > 0)
+        {
+            timeString.AppendFormat("{0:F2} second{1}", seconds, Math.Abs(seconds - 1.0f) < 0.01f ? "" : "s");
+        }
+        if (timeString.Length == 0 && speedMultiplier == 0)
+        {
+            timeString.Append("0.00 seconds");
+        }
         return $"Real Time -> Simulated Time\n1 second -> {timeString.ToString().Trim()}\nat 60 FPS";
     }
 

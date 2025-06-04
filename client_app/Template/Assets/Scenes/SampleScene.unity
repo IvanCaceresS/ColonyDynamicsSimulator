@@ -318,7 +318,7 @@ Transform:
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
   m_LocalRotation: {x: 0.7071068, y: 0, z: 0, w: 0.7071068}
-  m_LocalPosition: {x: 0, y: 150, z: 0}
+  m_LocalPosition: {x: 0, y: 1000, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -383,7 +383,7 @@ MonoBehaviour:
   moveSpeed: 200
   verticalSpeed: 200
   moveSmoothTime: 0.1
-  rotationSpeed: 200
+  rotationSpeed: 20
   rotationSmoothTime: 0.05
   zoomSpeed: 15
   minZoom: 5
@@ -721,18 +721,19 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9e572d7ac8153574e856a4e4995235d2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  eColiPrefabName: EColi
-  sCerevisiaePrefabName: SCerevisiae
-  initialNumberOfEColi: 50
-  initialNumberOfSCerevisiae: 30
-  initialEColiColonyRadius: 10
-  initialSCerevisiaeColonyRadius: 20
-  overallPlacementRadius: 50
-  minColonySeparation: 40
-  groundLevelY: 0.5
+  defaultInitialCountForEachOrganism: 50
+  defaultColonyRadiusForEachOrganism: 15
+  groundLevelY: 1.75
   maxPlacementDistanceFromOrigin: 900
   spawnerWaitTimeout: 10
   spawnerCheckInterval: 0.5
+  previewCircleSegments: 64
+  redUnlitMaterial: {fileID: 2100000, guid: 635cf9dae3f4c9740ac43866d67c16aa, type: 2}
+  greenUnlitMaterial: {fileID: 2100000, guid: ea862a6ce12d1454d901da2abef4debe, type: 2}
+  maxBoundaryPreviewColor: {r: 1, g: 0, b: 0, a: 1}
+  colonyRadiusPreviewColor: {r: 0, g: 1, b: 0, a: 0.3}
+  previewLineWidth: 2
+  previewYOffset: 0.05
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

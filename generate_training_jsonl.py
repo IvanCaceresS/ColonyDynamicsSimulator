@@ -145,10 +145,7 @@ def extraer_todo_el_contenido(ruta_archivo):
 
 
 def main():
-    # --- Configuración de Rutas ---
-    # Asegúrate de que estas rutas sean correctas para tu sistema.
-    # El r"" al principio (raw string) ayuda a manejar las barras invertidas en Windows.
-    base_path = r"C:\Users\Ivaaan\Downloads\SimulationTest\Assets"
+    base_path = r"C:\SimulationTest\Assets" # CAMBIAR TOBIAS CAMBIAAAR!
     
     ruta_archivo1 = os.path.join(base_path, r"Editor\PrefabMaterialCreator.cs")
     ruta_archivo2 = os.path.join(base_path, r"Scripts\General\CreatePrefabsOnClick.cs")
@@ -160,19 +157,16 @@ def main():
     todos_los_segmentos = []
     contador_actual = 1
 
-    # 1. Procesar PrefabMaterialCreator.cs
     contenido1 = extraer_contenido_archivo1(ruta_archivo1)
-    if contenido1 is not None: # Se procesó, incluso si el contenido es vacío.
+    if contenido1 is not None:
         todos_los_segmentos.append(f"{contador_actual}.PrefabMaterialCreator.cs{{{contenido1}}}")
         contador_actual += 1
 
-    # 2. Procesar CreatePrefabsOnClick.cs
     contenido2 = extraer_contenido_archivo2(ruta_archivo2)
-    if contenido2 is not None: # Se procesó, incluso si el contenido es vacío.
+    if contenido2 is not None:
         todos_los_segmentos.append(f"{contador_actual}.CreatePrefabsOnClick.cs{{{contenido2}}}")
         contador_actual += 1
-    
-    # 3. Procesar archivos en Components (todo el contenido)
+
     print(f"\nProcesando directorio Components: {ruta_directorio_componentes}")
     contenidos_componentes, contador_actual = procesar_directorio_generico(
         ruta_directorio_componentes, 
@@ -182,7 +176,6 @@ def main():
     )
     todos_los_segmentos.extend(contenidos_componentes)
 
-    # 4. Procesar archivos en Systems (contenido específico)
     print(f"\nProcesando directorio Systems: {ruta_directorio_systems}")
     contenidos_systems, contador_actual = procesar_directorio_generico(
         ruta_directorio_systems,
@@ -192,7 +185,6 @@ def main():
     )
     todos_los_segmentos.extend(contenidos_systems)
 
-    # Unir todos los segmentos.
     string_final = "".join(todos_los_segmentos)
 
     try:

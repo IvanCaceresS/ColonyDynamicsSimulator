@@ -18,6 +18,7 @@ public partial class GeneralSystem : SystemBase
             return;
 
         float deltaTime = GameStateManager.DeltaTime;
+        float elapsedTimeForSeed = (float)SystemAPI.Time.ElapsedTime; 
         EntityQuery query = GetEntityQuery(typeof(LocalTransform));
         int capacity = math.max(1024, query.CalculateEntityCount() * 2);
         NativeParallelHashMap<Entity, ParentData> parentMap =
@@ -36,30 +37,9 @@ public partial class GeneralSystem : SystemBase
         EndSimulationEntityCommandBufferSystem ecbSystem =
             World.GetOrCreateSystemManaged<EndSimulationEntityCommandBufferSystem>();
         var ecb = ecbSystem.CreateCommandBuffer().AsParallelWriter();
-        Dependency=Entities.WithReadOnly(parentMap).ForEach((Entity entity,int entityInQueryIndex,ref LocalTransform transform,ref GeneralComponent organism)=>
-        {   
-            if (!organism.TimeReferenceInitialized)
-            {
-                Unity.Mathematics.Random rng = new Unity.Mathematics.Random((uint)(entityInQueryIndex + 1) * 99999);
-                float randomMultiplier = rng.NextFloat(0.9f, 1.1f);
-                organism.TimeReference *= randomMultiplier;
-                organism.TimeReferenceInitialized = true;
-            }
-            float maxScale=organism.MaxScale;
-            organism.GrowthDuration=organism.DivisionInterval=organism.TimeReference*organism.SeparationThreshold;
-            if(transform.Scale<maxScale)
-            {
-                organism.GrowthTime+=deltaTime;
-                float t=math.clamp(organism.GrowthTime/organism.GrowthDuration,0f,1f);
-                float initialScale=organism.IsInitialCell?maxScale:0.01f;
-                transform.Scale=math.lerp(initialScale,maxScale,t);}
-
-
-
-
-            ecb.SetComponent(entityInQueryIndex, entity, transform);
-            ecb.SetComponent(entityInQueryIndex, entity, organism);
-        }).ScheduleParallel(Dependency);
+        //CODE START
+        
+        //CODE END
         ecbSystem.AddJobHandleForProducer(Dependency);
         Dependency = parentMap.Dispose(Dependency);
     }

@@ -178,7 +178,7 @@ public class Left_GUI : MonoBehaviour
         sortedSpecificOrganisms.Clear();
         foreach (var pair in entityCounts)
         {
-            if (pair.Key != "Organism count")
+            if (pair.Key != "Organism count" && pair.Value > 0) 
             {
                 sortedSpecificOrganisms.Add(pair);
             }
