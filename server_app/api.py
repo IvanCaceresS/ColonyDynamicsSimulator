@@ -345,6 +345,7 @@ def handle_call_secondary():
     result = _call_openai_api_with_cache(
         pregunta, SECONDARY_FINE_TUNED_MODEL_NAME, SYSTEM_MESSAGE_SECONDARY, use_cache
     )
+    print(f"[API RESP] /call_secondary: '{result.get('reply', '')[:100]}...' (status: {result.get('status_code', 500)})")
     return jsonify(result), result.get("status_code", 500)
 
 
