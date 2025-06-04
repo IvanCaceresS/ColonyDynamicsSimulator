@@ -58,7 +58,7 @@ tooltip_window = None
 tooltip_delay = 700
 tooltip_job_id = None
 logo_photo_ref = None
-ICON_PATH_MAC = APP_BASE_DIR / "img" / "icono.icns"
+ICON_PATH_MAC = APP_BASE_DIR / "img" / "icon.icns"
 LOGO_PATHS = [APP_BASE_DIR / "img" / "logo_light.png", APP_BASE_DIR / "img" / "logo_dark.png"]
 LOGO_WIDTH = 200
 ctk.set_appearance_mode("System")

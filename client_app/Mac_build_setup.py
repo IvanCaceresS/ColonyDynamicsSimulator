@@ -8,7 +8,7 @@ import shutil
 APP_NAME = "SimulationManager"
 MAIN_SCRIPT = 'Mac_main.py'
 VERSION = '1.0.0'
-ICON_MAC = 'img/icono.icns'
+ICON_MAC = 'img/icon.icns'
 
 OPTIONS = {
     'argv_emulation': True,

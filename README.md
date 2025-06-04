@@ -5,7 +5,7 @@
 - Luego activar entorno virtual venv/Scripts/activate 
 - Build app:
     **Dentro de app/**
-    - pyinstaller --onefile --windowed --name SimulationManager --icon="img/icono.ico" main.py
+    - pyinstaller --onefile --windowed --name SimulationManager --icon="img/icon.ico" main.py
     - Luego mover '.env' 'img' 'Responses' 'Simulations' y 'Template' a la carpeta /dist que dentro tiene SimulationManager.exe
 # DEV MacOS:
 - chmod +x setup_env.sh
@@ -14,4 +14,4 @@
 - Build app MacOS:
     **Dentro de app/** 
     - pip3 install pyinstaller
-    - pyinstaller --onefile --windowed --name SimulationManager --icon="img/icono.icns" main.py
+    - pyinstaller --onefile --windowed --name SimulationManager --icon="img/icon.icns" main.py
