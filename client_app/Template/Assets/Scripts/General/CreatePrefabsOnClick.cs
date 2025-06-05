@@ -471,24 +471,16 @@ public class CreatePrefabsOnClick : MonoBehaviour
         {
             if(messageCanvas != null && messageCanvas.activeSelf) messageCanvas.SetActive(false);
             
-            float maxWindowHeight = Screen.height * 0.9f;
-            float windowWidth = Mathf.Min(Screen.width * 0.85f, 750f); 
+            float windowWidth = Mathf.Min(Screen.width * 0.85f, 750f);
+            float maxWindowHeight = Screen.height * 0.5f;
 
-            float fieldHeight = 30f; 
-            float labelHeight = 25f;
-            float spacing = 10f;
-            float organismGroupSpacing = 18f;
-            float buttonHeight = 50f; 
-            float headerPerOrganismHeight = 30f;
-            float warningHeightEstimate = 40f; 
-
-            float entriesPerOrganismHeight = 2 * (labelHeight + fieldHeight + spacing/2); 
-            float totalContentHeight = organismConfigs.Count * (headerPerOrganismHeight + entriesPerOrganismHeight + organismGroupSpacing) 
-                                     + buttonHeight + warningHeightEstimate + spacing * 3; 
-            
-            float windowHeight = Mathf.Min(totalContentHeight - 80f, maxWindowHeight); 
-            
-            Rect windowRect = new Rect((Screen.width - windowWidth) / 2, (Screen.height - windowHeight) / 2, windowWidth, windowHeight);
+            Rect windowRect = new Rect(
+                (Screen.width - windowWidth) / 2, 
+                (Screen.height - maxWindowHeight) / 2, 
+                windowWidth, 
+                maxWindowHeight
+            );
+                
             GUILayout.Window(0, windowRect, DrawConfigurationWindow, "Initial Organism Setup", windowStyle);
         }
         else
@@ -501,140 +493,142 @@ public class CreatePrefabsOnClick : MonoBehaviour
     void DrawConfigurationWindow(int windowID)
     {
         float fieldWidth = 90f;
-        float labelWidth = 250f; 
-        float spacing = 8f; 
+        float labelWidth = 250f;
+        float spacing = 8f;
         float organismGroupSpacing = 15f;
         float buttonHeight = 45f;
 
         GUILayout.BeginVertical();
-        GUILayout.Space(10);  
+        GUILayout.Space(10);
 
-        scrollPosition = GUILayout.BeginScrollView(scrollPosition, false, true, GUILayout.ExpandHeight(true)); 
+        scrollPosition = GUILayout.BeginScrollView(
+            scrollPosition,
+            false,
+            true,
+            GUILayout.ExpandHeight(true)
+        );
 
-        foreach (var config in organismConfigs)
+        if (organismConfigs != null && organismConfigs.Count > 0)
         {
-            GUILayout.Label($"{config.prefabName} Configuration", subHeaderLabelStyle); 
-            
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("Initial Count:", labelStyle, GUILayout.Width(labelWidth));
-            config.countInput = GUILayout.TextField(config.countInput, textFieldStyle, GUILayout.Width(fieldWidth), GUILayout.ExpandWidth(false));
-            GUILayout.FlexibleSpace();
-            GUILayout.EndHorizontal();
-            
-            GUILayout.Space(spacing / 2); 
-            
-            GUILayout.BeginHorizontal();
-            GUILayout.Label($"Colony Radius (1-900 µm):", labelStyle, GUILayout.Width(labelWidth));
-            config.radiusInput = GUILayout.TextField(config.radiusInput, textFieldStyle, GUILayout.Width(fieldWidth), GUILayout.ExpandWidth(false));
-            GUILayout.FlexibleSpace();
-            GUILayout.EndHorizontal();
-            
-            GUILayout.Space(organismGroupSpacing); 
+            foreach (var config in organismConfigs)
+            {
+                GUILayout.Label($"{config.prefabName} Configuration", subHeaderLabelStyle);
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("Initial Count:", labelStyle, GUILayout.Width(labelWidth));
+                config.countInput = GUILayout.TextField(config.countInput, textFieldStyle, GUILayout.Width(fieldWidth), GUILayout.ExpandWidth(false));
+                GUILayout.FlexibleSpace();
+                GUILayout.EndHorizontal();
+                GUILayout.Space(spacing / 2);
+                GUILayout.BeginHorizontal();
+                GUILayout.Label($"Colony Radius (1-900 µm):", labelStyle, GUILayout.Width(labelWidth));
+                config.radiusInput = GUILayout.TextField(config.radiusInput, textFieldStyle, GUILayout.Width(fieldWidth), GUILayout.ExpandWidth(false));
+                GUILayout.FlexibleSpace();
+                GUILayout.EndHorizontal();
+                GUILayout.Space(organismGroupSpacing);
+            }
+        }
+        else
+        {
+            GUILayout.Label("No organism configurations loaded.", labelStyle);
         }
         GUILayout.EndScrollView();
 
-        // Calculate total organisms based on current text inputs for warnings and button enablement
-        long totalOrganismsForWarning = 0; // Represents sum from current inputs
-        performanceWarningText = "";       // UI warning text for >100k, reset per OnGUI pass
-        string zeroCountBlockerText = "";  // UI warning text for count == 0
+        long totalOrganismsForWarning = 0;
+        string localPerformanceWarningText = "";
+        string zeroCountBlockerText = "";
 
-        foreach (var config in organismConfigs)
+        if (organismConfigs != null)
         {
-            if (int.TryParse(config.countInput, out int count))
+            foreach (var config in organismConfigs)
             {
-                totalOrganismsForWarning += Mathf.Max(0, count);
+                if (int.TryParse(config.countInput, out int count))
+                {
+                    totalOrganismsForWarning += Mathf.Max(0, count);
+                }
             }
-            // If TryParse fails, count is effectively 0 for this preliminary sum
         }
 
         bool enableStartButton = true;
-
-        if (totalOrganismsForWarning == 0)
+        if (totalOrganismsForWarning == 0 && (organismConfigs != null && organismConfigs.Count > 0))
         {
             zeroCountBlockerText = "CANNOT START: Total organism count is zero. Please enter counts for organisms.";
             enableStartButton = false;
         }
-        else if (totalOrganismsForWarning > 100000) // Original condition for performanceWarningText
+        else if (organismConfigs == null || organismConfigs.Count == 0)
         {
-            // This sets the member field `performanceWarningText`
-            performanceWarningText = $"Warning: High organism count ({totalOrganismsForWarning:N0}) may impact performance.";
-            // Button remains enabled if count > 0
+            zeroCountBlockerText = "CANNOT START: No organism configurations loaded.";
+            enableStartButton = false;
         }
-        // If totalOrganismsForWarning is > 0 and <= 100000, both zeroCountBlockerText and performanceWarningText will be empty.
+        else if (totalOrganismsForWarning > 100000)
+        {
+            localPerformanceWarningText = $"Warning: High organism count ({totalOrganismsForWarning:N0}) may impact performance.";
+        }
 
-        // Display appropriate UI warning
         if (!string.IsNullOrEmpty(zeroCountBlockerText))
         {
             GUILayout.Label(zeroCountBlockerText, warningLabelStyle, GUILayout.ExpandWidth(true));
         }
-        else if (!string.IsNullOrEmpty(performanceWarningText)) // Show performance warning only if not blocked by zero count
+        else if (!string.IsNullOrEmpty(localPerformanceWarningText))
         {
-            GUILayout.Label(performanceWarningText, warningLabelStyle, GUILayout.ExpandWidth(true));
+            GUILayout.Label(localPerformanceWarningText, warningLabelStyle, GUILayout.ExpandWidth(true));
         }
         else
         {
-            // Ensure consistent spacing if no UI warning is shown
-            GUILayout.Space(warningLabelStyle.fontSize + warningLabelStyle.margin.vertical);
+            if (warningLabelStyle != null && warningLabelStyle.fontSize > 0)
+            {
+                GUILayout.Space(warningLabelStyle.lineHeight > 0 ? warningLabelStyle.lineHeight : warningLabelStyle.fontSize + (warningLabelStyle.margin != null ? warningLabelStyle.margin.vertical : 4));
+            } else {
+                GUILayout.Space(GUI.skin.label.lineHeight > 0 ? GUI.skin.label.lineHeight : GUI.skin.label.fontSize + 4);
+            }
         }
         
-        GUILayout.FlexibleSpace(); 
-
-        GUI.enabled = enableStartButton; // Disable/Enable the button based on totalOrganismsForWarning
-
-        if (GUILayout.Button("Start Simulation", buttonStyle, GUILayout.Height(buttonHeight), GUILayout.ExpandWidth(true))) 
+        GUI.enabled = enableStartButton;
+        if (GUILayout.Button("Start Simulation", buttonStyle, GUILayout.Height(buttonHeight), GUILayout.ExpandWidth(true)))
         {
-            // This block only executes if enableStartButton was true (i.e., totalOrganismsForWarning > 0)
-
             bool allParseSuccess = true;
-            long totalFinalOrganismCount = 0; // This is the count after full parsing and applying defaults
-
-            foreach (var config in organismConfigs)
+            long totalFinalOrganismCount = 0;
+            if (organismConfigs != null)
             {
-                // Parse countInput to config.currentCount
-                if (!int.TryParse(config.countInput, out config.currentCount)) 
-                { 
-                    config.currentCount = defaultInitialCountForEachOrganism; 
-                    allParseSuccess = false; 
-                    Debug.LogError($"Invalid count for {config.prefabName}: '{config.countInput}' - reset to default {config.currentCount}."); 
-                }
-                config.currentCount = Mathf.Max(0, config.currentCount); // Ensure non-negative
+                foreach (var config in organismConfigs)
+                {
+                    if (!int.TryParse(config.countInput, out config.currentCount))
+                    {
+                        config.currentCount = defaultInitialCountForEachOrganism;
+                        allParseSuccess = false;
+                        Debug.LogError($"Invalid count for {config.prefabName}: '{config.countInput}' - reset to default {config.currentCount}.");
+                    }
+                    config.currentCount = Mathf.Max(0, config.currentCount);
 
-                // Parse radiusInput to config.currentColonyRadius
-                if (!float.TryParse(config.radiusInput, NumberStyles.Any, CultureInfo.InvariantCulture, out float parsedRadius)) 
-                { 
-                    parsedRadius = defaultColonyRadiusForEachOrganism; 
-                    allParseSuccess = false; 
-                    Debug.LogError($"Invalid radius for {config.prefabName}: '{config.radiusInput}' - reset to default {parsedRadius}."); 
+                    if (!float.TryParse(config.radiusInput, NumberStyles.Any, CultureInfo.InvariantCulture, out float parsedRadius))
+                    {
+                        parsedRadius = defaultColonyRadiusForEachOrganism;
+                        allParseSuccess = false;
+                        Debug.LogError($"Invalid radius for {config.prefabName}: '{config.radiusInput}' - reset to default {parsedRadius}.");
+                    }
+                    config.currentColonyRadius = Mathf.Clamp(parsedRadius, 1f, 900f);
+                    config.radiusInput = config.currentColonyRadius.ToString("F1", CultureInfo.InvariantCulture);
+                    totalFinalOrganismCount += config.currentCount;
                 }
-                config.currentColonyRadius = Mathf.Clamp(parsedRadius, 1f, 900f);
-                config.radiusInput = config.currentColonyRadius.ToString("F1", CultureInfo.InvariantCulture); // Update input field with clamped/parsed value
-
-                totalFinalOrganismCount += config.currentCount;
             }
-            
-            if(allParseSuccess) Debug.Log("Configuration accepted."); 
-            else Debug.LogWarning("One or more invalid config values were reset to defaults. Check console.");
-            
-            Debug.Log($"Total organisms to be spawned: {totalFinalOrganismCount}");
 
-            // Original console warning logic for totalFinalOrganismCount > 100000
-            // performanceWarningText (member field) would be set if totalOrganismsForWarning (from inputs) > 100000.
-            // If it's empty, it means inputs were <= 100000. If totalFinalOrganismCount (after defaults) is > 100000, this log is useful.
-            if (totalFinalOrganismCount > 100000 && string.IsNullOrEmpty(performanceWarningText)) 
+            if (allParseSuccess) Debug.Log("Configuration accepted.");
+            else Debug.LogWarning("One or more invalid config values were reset to defaults. Check console.");
+            Debug.Log($"Total organisms to be spawned: {totalFinalOrganismCount}");
+            if (totalFinalOrganismCount > 100000 && string.IsNullOrEmpty(localPerformanceWarningText))
             {
                 Debug.LogWarning($"PERFORMANCE WARNING (from final parsed count): Total organism count ({totalFinalOrganismCount}) is high and may impact performance.");
             }
 
             showConfigurationUI = false;
             currentPlacementState = PlacementState.WaitingForSpawnerEntities;
-            if(messageCanvas != null) messageCanvas.SetActive(true); 
+            if (messageCanvas != null) messageCanvas.SetActive(true);
             StartCoroutine(HandleColonyPlacementWorkflow());
         }
-        GUI.enabled = true; // IMPORTANT: Always restore GUI.enabled state for other UI elements
+        GUI.enabled = true;
 
-        GUILayout.Space(10); 
+        GUILayout.Space(10);
         GUILayout.EndVertical();
-        GUI.DragWindow(); 
+        GUI.DragWindow();
     }
 
     private IEnumerator HandleColonyPlacementWorkflow()
