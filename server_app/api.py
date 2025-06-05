@@ -202,8 +202,7 @@ def _call_openai_api(pregunta: str, model_name: str, system_message: str) -> dic
         print(f"Unexpected Error in _call_openai_api: {type(e).__name__}: {e}\n{traceback.format_exc()}")
         return {"error": f"Unexpected Server Error: {type(e).__name__}", "status_code": 500}
 
-def _call_openai_api_with_cache(pregunta: str, model_name: str, system_message: str, use_cache: bool) -> dict:
-    """Calls the OpenAI API, using cache logic if enabled."""
+def _call_openai_api_with_cache(pregunta: str, model_name: str, system_message: str, use_cache: bool, save_to_cache: bool) -> dict:
     if use_cache:
         cached_reply = get_cached_response(pregunta)
         if cached_reply is not None:
@@ -216,12 +215,15 @@ def _call_openai_api_with_cache(pregunta: str, model_name: str, system_message: 
     print(f"[API] No cache or miss. Calling OpenAI for '{pregunta[:50]}...'")
     api_result = _call_openai_api(pregunta, model_name, system_message)
 
-    if use_cache and api_result.get("status_code") == 200 and "reply" in api_result:
-        print(f"[Cache] Saving response to cache for '{pregunta[:50]}...'")
+    if use_cache and save_to_cache and api_result.get("status_code") == 200 and "reply" in api_result:
+        print(f"[Cache] Saving response to cache for '{pregunta[:50]}...' (Model: Primary)")
         write_response_to_csv(
             pregunta, api_result["reply"],
             api_result.get("input_tokens", 0), api_result.get("output_tokens", 0)
         )
+    elif use_cache and not save_to_cache and api_result.get("status_code") == 200:
+         print(f"[Cache] Skipping cache save for this model type (Model: Secondary)")
+
 
     if api_result.get("status_code") == 200:
         api_result["cached"] = False
@@ -322,7 +324,7 @@ def handle_call_primary():
         return jsonify({"error": "Primary model not configured in api.env"}), 500
 
     result = _call_openai_api_with_cache(
-        pregunta, FINE_TUNED_MODEL_NAME, SYSTEM_MESSAGE_PRIMARY, use_cache
+        pregunta, FINE_TUNED_MODEL_NAME, SYSTEM_MESSAGE_PRIMARY, use_cache, save_to_cache=True
     )
     return jsonify(result), result.get("status_code", 500)
 
@@ -344,7 +346,7 @@ def handle_call_secondary():
         return jsonify({"error": "Secondary model not configured in api.env"}), 500
 
     result = _call_openai_api_with_cache(
-        pregunta, SECONDARY_FINE_TUNED_MODEL_NAME, SYSTEM_MESSAGE_SECONDARY, use_cache
+        pregunta, SECONDARY_FINE_TUNED_MODEL_NAME, SYSTEM_MESSAGE_SECONDARY, use_cache, save_to_cache=False
     )
     print(f"[API RESP] /call_secondary: '{result.get('reply', '')[:100]}...' (status: {result.get('status_code', 500)})")
     return jsonify(result), result.get("status_code", 500)
