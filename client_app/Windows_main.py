@@ -1,5 +1,6 @@
 import sys
 import os
+import textwrap
 import traceback
 import shutil
 import subprocess
@@ -436,11 +437,8 @@ def split_braces_outside_strings(code: str) -> str:
             ch = line[i]
             if ch == '"':
                 in_string = not in_string
-                new_line_chars.append(ch)
-            elif ch == '{' and not in_string:
-                new_line_chars.append('\n{\n')
-            elif ch == '}' and not in_string:
-                new_line_chars.append('\n}\n')
+            elif ch in ['{', '}'] and not in_string:
+                new_line_chars.append(f'\n{ch}\n')
             else:
                 new_line_chars.append(ch)
             i += 1
@@ -448,6 +446,7 @@ def split_braces_outside_strings(code: str) -> str:
     return ''.join(result_lines)
 
 def format_csharp(contenido: str) -> str:
+    # Esta función es segura para el código de PrefabMaterialCreator, ya que no suele tener ; dentro de strings.
     preprocesado = split_braces_outside_strings(contenido)
     preprocesado = re.sub(r';', r';\n', preprocesado)
     preprocesado = re.sub(r'\n\s*\n', '\n', preprocesado)
@@ -463,63 +462,175 @@ def format_csharp(contenido: str) -> str:
             nivel_indentacion += 1
     return "\n".join(contenido_formateado)
 
+def _insert_code_between_markers(template_content: str, code_to_insert: str, start_marker: str, end_marker: str) -> Union[str, None]:
+    """
+    Inserta un bloque de código entre dos marcadores de forma segura,
+    sin que el motor de regex interprete el contenido del código.
+    """
+    # Patrón para encontrar el bloque completo, incluyendo los marcadores
+    pattern = re.compile(re.escape(start_marker) + r'.*?' + re.escape(end_marker), re.DOTALL)
+    
+    match = pattern.search(template_content)
+    
+    if not match:
+        # Si no se encuentran los marcadores, no se hace nada.
+        return None
+
+    # Construir la nueva cadena manualmente es la forma más segura
+    start_index = match.start()
+    end_index = match.end()
+    
+    new_block = f"{start_marker}\n{code_to_insert}\n{end_marker}"
+    
+    return template_content[:start_index] + new_block + template_content[end_index:]
+
 def separar_codigos_por_archivo(respuesta: str) -> Dict[str, str]:
-    actual_content = respuesta
-    if actual_content.startswith('"') and actual_content.endswith('"'):
-        actual_content = actual_content[1:-1]
-
-    regex_especifico = (
-        r"1\.PrefabMaterialCreator\.cs\{(.*?)\}"
-        r"2\.CreatePrefabsOnClick\.cs\{(.*?)\}"
-        r"3\.OrganismTypes\{(.*?)\}"
-        r"$"
-    )
-
+    actual_content = respuesta.strip().strip('"')
+    # Usamos el formato de 2 partes que definimos
+    regex_especifico = r"1\.PrefabMaterialCreator\.cs\{(.*?)\}2\.OrganismTypes\{(.*?)\}"
     match = re.search(regex_especifico, actual_content, re.DOTALL)
 
     codigos = {}
     if match:
-        contenido_pmc = match.group(1).strip()
-        contenido_cpoc = match.group(2).strip()
-        contenido_ot = match.group(3).strip()
-
-        codigos["PrefabMaterialCreator.cs"] = format_csharp(contenido_pmc)
-        codigos["CreatePrefabsOnClick.cs"] = format_csharp(contenido_cpoc)
-        codigos["OrganismTypes"] = contenido_ot
+        # No formateamos el código de PMC aquí, porque es una sola línea de llamadas
+        # que no se beneficia del formateador y evita posibles errores.
+        codigos["PrefabMaterialCreator.cs"] = match.group(1).strip()
+        codigos["OrganismTypes"] = match.group(2).strip()
     else:
-        return {}
-            
+        print("Warning: Response string does not match expected format.")
+    
     return codigos
 
-def _insert_code_between_markers(template_content: str, code_to_insert: str) -> Union[str, None]:
-    start_marker = "//CODE START"
-    end_marker = "//CODE END"
-    start_marker_idx = template_content.find(start_marker)
-    if start_marker_idx == -1:
-        return None
-    end_marker_idx = template_content.find(end_marker, start_marker_idx + len(start_marker))
-    if end_marker_idx == -1:
-        return None
-    head = template_content[:start_marker_idx + len(start_marker)]
-    tail = template_content[end_marker_idx:]
-    return f"{head}\n{code_to_insert}\n{tail}"
+def get_collider_templates() -> dict:
+    return {
+        "Bacilo": textwrap.dedent("""
+            colliderAsset = Unity.Physics.CapsuleCollider.Create(new CapsuleGeometry
+            {
+                Vertex0 = new float3(0, -scale * 0.5f, 0), Vertex1 = new float3(0, scale * 0.5f, 0), Radius = scale * 0.25f
+            }, CollisionFilter.Default, physicsMat);
+        """).strip(),
+        "Cocco": textwrap.dedent("""
+            colliderAsset = Unity.Physics.SphereCollider.Create(new SphereGeometry
+            {
+                Center = float3.zero, Radius = scale * 0.1f
+            }, CollisionFilter.Default, physicsMat);
+        """).strip(),
+        "Helicoide": textwrap.dedent("""
+            const float axialLength = 10f;
+            const float helixRadius = 0.5f;
+            const float tubeRadius = 0.1f;
+            const float turns = 3f;
+            const int colliderSegments = 20;
+            NativeList<CompoundCollider.ColliderBlobInstance> heliColliders = new NativeList<CompoundCollider.ColliderBlobInstance>(colliderSegments, Allocator.Temp);
+            float segmentLength = axialLength / colliderSegments;
+            float angularChangePerUnitY = (axialLength > 0) ? (turns * 2 * Mathf.PI / axialLength) : 0f;
+            float subColliderActualRadius = tubeRadius;
+            for (int i = 0; i < colliderSegments; i++)
+            {
+                float yPos = -axialLength / 2.0f + segmentLength * (i + 0.5f);
+                float helixAngleAtY = yPos * angularChangePerUnitY;
+                float3 sphereCenter = new float3(
+                    helixRadius * math.cos(helixAngleAtY),
+                    yPos,
+                    helixRadius * math.sin(helixAngleAtY)
+                );
+                BlobAssetReference<Unity.Physics.Collider> sphereBlob = Unity.Physics.SphereCollider.Create(
+                    new SphereGeometry { Center = float3.zero, Radius = subColliderActualRadius },
+                    CollisionFilter.Default,
+                    physicsMat
+                );
+                heliColliders.Add(new CompoundCollider.ColliderBlobInstance
+                {
+                    Collider = sphereBlob,
+                    CompoundFromChild = new RigidTransform(quaternion.identity, sphereCenter)
+                });
+            }
+            if (heliColliders.IsCreated && heliColliders.Length > 0) colliderAsset = Unity.Physics.CompoundCollider.Create(heliColliders.AsArray());
+            else
+            {
+                colliderAsset = Unity.Physics.CapsuleCollider.Create(new CapsuleGeometry{
+                    Vertex0 = new float3(0, -axialLength/2f, 0),
+                    Vertex1 = new float3(0, axialLength/2f, 0),
+                    Radius = helixRadius + tubeRadius
+                }, CollisionFilter.Default, physicsMat);
+            }
+            if(heliColliders.IsCreated) heliColliders.Dispose();
+        """).strip()
+    }
+
+def parse_organism_data(input_str: str) -> list:
+    if not input_str.startswith('[') or not input_str.endswith(']'):
+        raise ValueError("Organism data must be enclosed in '[]'")
+    
+    content = input_str.strip('[]')
+    organism_entries = re.split(r';\s*(?=[^)]*(?:\(|$))', content)
+    
+    parsed_data = []
+    for entry in filter(None, (e.strip() for e in organism_entries)):
+        match = re.match(r'([^->]+)\s*->\s*([^()]+)\s*\((.*)\)', entry)
+        if not match:
+            print(f"Warning: Organism entry '{entry}' has incorrect format and will be ignored.")
+            continue
+        
+        name, morphology, params_str = (m.strip() for m in match.groups())
+        params = {
+            key.strip(): value.strip()
+            for pair in re.split(r',\s*(?=[a-zA-Z0-9_]+\s*=)', params_str)
+            if '=' in pair
+            for key, value in [pair.split('=', 1)]
+        }
+        parsed_data.append({'name': name, 'morphology': morphology, 'params': params})
+    return parsed_data
+
+def generate_csharp_switch_cases(organism_data: list, templates: dict) -> str:
+    cases = []
+    # Indentación para código dentro de un case en CreatePrefabsOnClick.cs
+    code_indent = ' ' * 12
+    for organism in organism_data:
+        name, morphology = organism['name'], organism['morphology']
+        template = templates.get(morphology)
+        body = textwrap.indent(template, code_indent) if template else f"{code_indent}// Morphology '{morphology}' not implemented."
+        cases.append(f'            case "{name}":\n{body}\n                break;')
+    return "\n\n".join(cases)
+
+def generate_csharp_if_else_block(organism_data: list) -> str:
+    blocks = []
+    param_indent = ' ' * 16
+    for i, organism in enumerate(organism_data):
+        name = organism['name']
+        param_lines = [f"{param_indent}{key} = {value}," for key, value in organism['params'].items()]
+        if param_lines: param_lines[-1] = param_lines[-1][:-1]
+        
+        params_code = "\n".join(param_lines)
+        keyword = "if" if i == 0 else "else if"
+        
+        block = textwrap.dedent(f"""\
+            {keyword} (prefabName == "{name}")
+            {{
+                entityManager.AddComponentData(newEntity, new {name}Component
+                {{
+{params_code}
+                }});
+            }}""")
+        blocks.append(block.strip())
+    return "\n        ".join(blocks)
 
 def import_codes(codes: Dict[str, str], simulation_name: str) -> bool:
     base_dir = os.getcwd()
     simulation_folder = os.path.join(base_dir, "Simulations", simulation_name)
     template_folder = os.path.join(base_dir, "Template")
 
-    if os.path.exists(simulation_folder):
-        if not os.path.isdir(simulation_folder):
-            return False
     if not os.path.exists(template_folder) or not os.path.isdir(template_folder):
+        print(f"Error: Template folder not found at '{template_folder}'")
         return False
-
-    try:
-        if not os.path.exists(simulation_folder):
+        
+    if not os.path.exists(simulation_folder):
+        try:
             shutil.copytree(template_folder, simulation_folder)
-    except Exception:
-        return False
+            print(f"Created new simulation folder '{simulation_name}' from template.")
+        except Exception as e:
+            print(f"Error creating simulation folder from template: {e}")
+            return False
 
     assets_editor_folder = os.path.join(simulation_folder, "Assets", "Editor")
     assets_scripts_folder = os.path.join(simulation_folder, "Assets", "Scripts")
@@ -527,151 +638,335 @@ def import_codes(codes: Dict[str, str], simulation_name: str) -> bool:
     assets_scripts_systems = os.path.join(assets_scripts_folder, "Systems")
     assets_scripts_general = os.path.join(assets_scripts_folder, "General")
 
-    os.makedirs(assets_editor_folder, exist_ok=True)
-    os.makedirs(assets_scripts_components, exist_ok=True)
-    os.makedirs(assets_scripts_systems, exist_ok=True)
-    os.makedirs(assets_scripts_general, exist_ok=True)
+    for d in [assets_editor_folder, assets_scripts_components, assets_scripts_systems, assets_scripts_general]:
+        os.makedirs(d, exist_ok=True)
 
     files_processed = []
 
-    pmc_file_name = "PrefabMaterialCreator.cs"
-    pmc_content = codes.get(pmc_file_name)
-    if pmc_content is not None:
-        dest_path_pmc = os.path.join(assets_editor_folder, pmc_file_name)
-        template_pmc_path = os.path.join(template_folder, "Assets", "Editor", pmc_file_name)
-        new_content_pmc = pmc_content
-        if os.path.exists(template_pmc_path):
-            try:
-                with open(template_pmc_path, "r", encoding="utf-8") as f_template:
-                    template_text = f_template.read()
-                processed_template = _insert_code_between_markers(template_text, pmc_content)
-                if processed_template is not None:
-                    new_content_pmc = processed_template
-            except Exception:
-                pass 
+    # --- 1. Procesar PrefabMaterialCreator.cs ---
+    pmc_content = codes.get("PrefabMaterialCreator.cs")
+    if pmc_content:
+        dest_path = os.path.join(assets_editor_folder, "PrefabMaterialCreator.cs")
         try:
-            with open(dest_path_pmc, "w", encoding="utf-8") as f_out:
-                f_out.write(new_content_pmc)
-            files_processed.append(dest_path_pmc)
-        except Exception:
-            pass
-
-    cpoc_file_name_key = "CreatePrefabsOnClick.cs"
-    cpoc_file_name_disk = "CreatePrefabsOnClick.cs" 
-    cpoc_content = codes.get(cpoc_file_name_key)
-    if cpoc_content is not None:
-        dest_path_cpoc = os.path.join(assets_scripts_general, cpoc_file_name_disk)
-        template_cpoc_path = os.path.join(template_folder, "Assets", "Scripts", "General", cpoc_file_name_disk)
-        new_content_cpoc = cpoc_content
-        if os.path.exists(template_cpoc_path):
-            try:
-                with open(template_cpoc_path, "r", encoding="utf-8") as f_template:
-                    template_text = f_template.read()
-                processed_template = _insert_code_between_markers(template_text, cpoc_content)
-                if processed_template is not None:
-                    new_content_cpoc = processed_template
-            except Exception:
-                pass
-        try:
-            with open(dest_path_cpoc, "w", encoding="utf-8") as f_out:
-                f_out.write(new_content_cpoc)
-            files_processed.append(dest_path_cpoc)
-        except Exception:
-            pass
-
-    organism_types_key = "OrganismTypes"
-    organism_types_content = codes.get(organism_types_key)
-    if organism_types_content:
-        cleaned_content = organism_types_content.strip()
-        if cleaned_content.startswith("[") and cleaned_content.endswith("]"):
-            cleaned_content = cleaned_content[1:-1]
-        
-        organism_pairs_list = []
-        if cleaned_content:
-            organism_pairs_list = cleaned_content.split(';')
-
-        for pair_str in organism_pairs_list:
-            pair_str_stripped = pair_str.strip()
-            if not pair_str_stripped:
-                continue
+            with open(dest_path, "r+", encoding="utf-8") as f:
+                template_text = f.read()
+                new_content = _insert_code_between_markers(template_text, pmc_content, "//CODE START", "//CODE END")
+                if new_content:
+                    f.seek(0)
+                    f.write(new_content)
+                    f.truncate()
+                    files_processed.append(dest_path)
+                    print(f"Successfully updated '{os.path.basename(dest_path)}'.")
+        except Exception as e:
+            print(f"Error processing PrefabMaterialCreator.cs: {e}")
             
-            try:
-                parts = pair_str_stripped.split('->')
-                if len(parts) != 2:
-                    continue
-                
-                organism_name = parts[0].strip()
-                organism_type = parts[1].strip()
+    # --- 2. Procesar OrganismTypes ---
+    organism_types_content = codes.get("OrganismTypes")
+    if organism_types_content:
+        try:
+            organisms = parse_organism_data(organism_types_content)
+            
+            # --- 2a. Actualizar CreatePrefabsOnClick.cs ---
+            cpoc_path = os.path.join(assets_scripts_general, "CreatePrefabsOnClick.cs")
+            if os.path.exists(cpoc_path) and organisms:
+                switch_code = generate_csharp_switch_cases(organisms, get_collider_templates())
+                if_else_code = generate_csharp_if_else_block(organisms)
 
-                if not organism_name or not organism_type:
-                    continue
+                with open(cpoc_path, "r+", encoding="utf-8") as f:
+                    content = f.read()
+                    new_content = _insert_code_between_markers(content, if_else_code, "//if_else_block START", "//if_else_block END")
+                    if new_content:
+                        new_content = _insert_code_between_markers(new_content, switch_code, "//case statements START", "//case statements END")
+                    
+                    if new_content:
+                        f.seek(0)
+                        f.write(new_content)
+                        f.truncate()
+                        files_processed.append(cpoc_path)
+                        print(f"Successfully updated '{os.path.basename(cpoc_path)}'.")
 
-                supported_types = {"Bacilo", "Cocco", "Helicoide"}
-                if organism_type not in supported_types:
-                    continue
-                
-                organism_name_for_code = organism_name.replace('.', '_')
-                                
-                template_comp_filename = f"{organism_type}Component.cs"
-                source_comp_path = os.path.join(template_folder, "Assets", "Scripts", "Components", template_comp_filename)
-                dest_comp_filename = f"{organism_name}Component.cs" 
-                dest_comp_path = os.path.join(assets_scripts_components, dest_comp_filename)
+            # --- 2b. Generar archivos de Componente y Sistema ---
+            for org in organisms:
+                name, morph = org['name'], org['morphology']
+                for file_type in ["Component", "System"]:
+                    template_file = f"{morph}{file_type}.cs"
+                    source_path = os.path.join(template_folder, "Assets", "Scripts", f"{file_type}s", template_file)
+                    
+                    if os.path.exists(source_path):
+                        dest_file = f"{name}{file_type}.cs"
+                        dest_path = os.path.join(assets_scripts_folder, f"{file_type}s", dest_file)
+                        with open(source_path, "r", encoding='utf-8') as f_tpl:
+                            tpl_text = f_tpl.read().replace(morph, name)
+                        with open(dest_path, "w", encoding='utf-8') as f_dst:
+                            f_dst.write(tpl_text)
+                        files_processed.append(dest_path)
+                        print(f"Created file: '{dest_file}'.")
+        except Exception as e:
+            print(f"Error processing OrganismTypes: {e}")
 
-                if os.path.exists(source_comp_path):
+    # --- 3. Limpiar archivos de plantilla no utilizados ---
+    processed_basenames = {os.path.basename(fp) for fp in files_processed}
+    for template_base_name in ["Bacilo", "Cocco", "Helicoide"]:
+        for file_type in ["Component", "System"]:
+            filename_to_check = f"{template_base_name}{file_type}.cs"
+            if filename_to_check not in processed_basenames:
+                path_to_remove = os.path.join(simulation_folder, "Assets", "Scripts", f"{file_type}s", filename_to_check)
+                if os.path.exists(path_to_remove):
                     try:
-                        with open(source_comp_path, "r", encoding="utf-8") as f_template_comp:
-                            template_text_comp = f_template_comp.read()
-                        modified_content_comp = template_text_comp.replace(organism_type, organism_name_for_code)
-                        with open(dest_comp_path, "w", encoding="utf-8") as f_out_comp:
-                            f_out_comp.write(modified_content_comp)
-                        files_processed.append(dest_comp_path)
-                    except Exception:
-                        pass
-                
-                template_sys_filename = f"{organism_type}System.cs"
-                source_sys_path = os.path.join(template_folder, "Assets", "Scripts", "Systems", template_sys_filename)
-                dest_sys_filename = f"{organism_name}System.cs"
-                dest_sys_path = os.path.join(assets_scripts_systems, dest_sys_filename)
-
-                if os.path.exists(source_sys_path):
-                    try:
-                        with open(source_sys_path, "r", encoding="utf-8") as f_template_sys:
-                            template_text_sys = f_template_sys.read()
-                        modified_content_sys = template_text_sys.replace(organism_type, organism_name_for_code)
-                        with open(dest_sys_path, "w", encoding="utf-8") as f_out_sys:
-                            f_out_sys.write(modified_content_sys)
-                        files_processed.append(dest_sys_path)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-    
-    generated_files_basenames = set()
-    for fp_processed in files_processed:
-        generated_files_basenames.add(os.path.basename(fp_processed))
-
-    template_type_base_names = ["Bacilo", "Cocco", "Helicoide"]
-
-    for template_base_name in template_type_base_names:
-        template_component_filename_to_check = f"{template_base_name}Component.cs"
-        if template_component_filename_to_check not in generated_files_basenames:
-            file_path_to_remove = os.path.join(assets_scripts_components, template_component_filename_to_check)
-            if os.path.exists(file_path_to_remove):
-                try:
-                    os.remove(file_path_to_remove)
-                except OSError:
-                    pass
-
-        template_system_filename_to_check = f"{template_base_name}System.cs"
-        if template_system_filename_to_check not in generated_files_basenames:
-            file_path_to_remove = os.path.join(assets_scripts_systems, template_system_filename_to_check)
-            if os.path.exists(file_path_to_remove):
-                try:
-                    os.remove(file_path_to_remove)
-                except OSError:
-                    pass
+                        os.remove(path_to_remove)
+                        print(f"Cleaned up unused template file: '{filename_to_check}'.")
+                    except OSError as e:
+                        print(f"Error cleaning up template file '{filename_to_check}': {e}")
                 
     return bool(files_processed)
+
+
+# def split_braces_outside_strings(code: str) -> str:
+#     result_lines = []
+#     in_string = False
+#     for line in code.splitlines(keepends=True):
+#         new_line_chars = []
+#         i = 0
+#         while i < len(line):
+#             ch = line[i]
+#             if ch == '"':
+#                 in_string = not in_string
+#                 new_line_chars.append(ch)
+#             elif ch == '{' and not in_string:
+#                 new_line_chars.append('\n{\n')
+#             elif ch == '}' and not in_string:
+#                 new_line_chars.append('\n}\n')
+#             else:
+#                 new_line_chars.append(ch)
+#             i += 1
+#         result_lines.append(''.join(new_line_chars))
+#     return ''.join(result_lines)
+
+# def format_csharp(contenido: str) -> str:
+#     preprocesado = split_braces_outside_strings(contenido)
+#     preprocesado = re.sub(r';', r';\n', preprocesado)
+#     preprocesado = re.sub(r'\n\s*\n', '\n', preprocesado)
+#     lineas = [l.strip() for l in preprocesado.split('\n') if l.strip()]
+#     nivel_indentacion = 0
+#     contenido_formateado = []
+#     indent_char = "    "
+#     for linea in lineas:
+#         if linea.startswith("}"):
+#             nivel_indentacion = max(nivel_indentacion - 1, 0)
+#         contenido_formateado.append(indent_char * nivel_indentacion + linea)
+#         if linea.endswith("{"):
+#             nivel_indentacion += 1
+#     return "\n".join(contenido_formateado)
+
+# def separar_codigos_por_archivo(respuesta: str) -> Dict[str, str]:
+#     actual_content = respuesta
+#     if actual_content.startswith('"') and actual_content.endswith('"'):
+#         actual_content = actual_content[1:-1]
+
+#     regex_especifico = (
+#         r"1\.PrefabMaterialCreator\.cs\{(.*?)\}"
+#         r"2\.CreatePrefabsOnClick\.cs\{(.*?)\}"
+#         r"3\.OrganismTypes\{(.*?)\}"
+#         r"$"
+#     )
+
+#     match = re.search(regex_especifico, actual_content, re.DOTALL)
+
+#     codigos = {}
+#     if match:
+#         contenido_pmc = match.group(1).strip()
+#         contenido_cpoc = match.group(2).strip()
+#         contenido_ot = match.group(3).strip()
+
+#         codigos["PrefabMaterialCreator.cs"] = format_csharp(contenido_pmc)
+#         codigos["CreatePrefabsOnClick.cs"] = format_csharp(contenido_cpoc)
+#         codigos["OrganismTypes"] = contenido_ot
+#     else:
+#         return {}
+            
+#     return codigos
+
+# def _insert_code_between_markers(template_content: str, code_to_insert: str) -> Union[str, None]:
+#     start_marker = "//CODE START"
+#     end_marker = "//CODE END"
+#     start_marker_idx = template_content.find(start_marker)
+#     if start_marker_idx == -1:
+#         return None
+#     end_marker_idx = template_content.find(end_marker, start_marker_idx + len(start_marker))
+#     if end_marker_idx == -1:
+#         return None
+#     head = template_content[:start_marker_idx + len(start_marker)]
+#     tail = template_content[end_marker_idx:]
+#     return f"{head}\n{code_to_insert}\n{tail}"
+
+# def import_codes(codes: Dict[str, str], simulation_name: str) -> bool:
+#     base_dir = os.getcwd()
+#     simulation_folder = os.path.join(base_dir, "Simulations", simulation_name)
+#     template_folder = os.path.join(base_dir, "Template")
+
+#     if os.path.exists(simulation_folder):
+#         if not os.path.isdir(simulation_folder):
+#             return False
+#     if not os.path.exists(template_folder) or not os.path.isdir(template_folder):
+#         return False
+
+#     try:
+#         if not os.path.exists(simulation_folder):
+#             shutil.copytree(template_folder, simulation_folder)
+#     except Exception:
+#         return False
+
+#     assets_editor_folder = os.path.join(simulation_folder, "Assets", "Editor")
+#     assets_scripts_folder = os.path.join(simulation_folder, "Assets", "Scripts")
+#     assets_scripts_components = os.path.join(assets_scripts_folder, "Components")
+#     assets_scripts_systems = os.path.join(assets_scripts_folder, "Systems")
+#     assets_scripts_general = os.path.join(assets_scripts_folder, "General")
+
+#     os.makedirs(assets_editor_folder, exist_ok=True)
+#     os.makedirs(assets_scripts_components, exist_ok=True)
+#     os.makedirs(assets_scripts_systems, exist_ok=True)
+#     os.makedirs(assets_scripts_general, exist_ok=True)
+
+#     files_processed = []
+
+#     pmc_file_name = "PrefabMaterialCreator.cs"
+#     pmc_content = codes.get(pmc_file_name)
+#     if pmc_content is not None:
+#         dest_path_pmc = os.path.join(assets_editor_folder, pmc_file_name)
+#         template_pmc_path = os.path.join(template_folder, "Assets", "Editor", pmc_file_name)
+#         new_content_pmc = pmc_content
+#         if os.path.exists(template_pmc_path):
+#             try:
+#                 with open(template_pmc_path, "r", encoding="utf-8") as f_template:
+#                     template_text = f_template.read()
+#                 processed_template = _insert_code_between_markers(template_text, pmc_content)
+#                 if processed_template is not None:
+#                     new_content_pmc = processed_template
+#             except Exception:
+#                 pass 
+#         try:
+#             with open(dest_path_pmc, "w", encoding="utf-8") as f_out:
+#                 f_out.write(new_content_pmc)
+#             files_processed.append(dest_path_pmc)
+#         except Exception:
+#             pass
+
+#     cpoc_file_name_key = "CreatePrefabsOnClick.cs"
+#     cpoc_file_name_disk = "CreatePrefabsOnClick.cs" 
+#     cpoc_content = codes.get(cpoc_file_name_key)
+#     if cpoc_content is not None:
+#         dest_path_cpoc = os.path.join(assets_scripts_general, cpoc_file_name_disk)
+#         template_cpoc_path = os.path.join(template_folder, "Assets", "Scripts", "General", cpoc_file_name_disk)
+#         new_content_cpoc = cpoc_content
+#         if os.path.exists(template_cpoc_path):
+#             try:
+#                 with open(template_cpoc_path, "r", encoding="utf-8") as f_template:
+#                     template_text = f_template.read()
+#                 processed_template = _insert_code_between_markers(template_text, cpoc_content)
+#                 if processed_template is not None:
+#                     new_content_cpoc = processed_template
+#             except Exception:
+#                 pass
+#         try:
+#             with open(dest_path_cpoc, "w", encoding="utf-8") as f_out:
+#                 f_out.write(new_content_cpoc)
+#             files_processed.append(dest_path_cpoc)
+#         except Exception:
+#             pass
+
+#     organism_types_key = "OrganismTypes"
+#     organism_types_content = codes.get(organism_types_key)
+#     if organism_types_content:
+#         cleaned_content = organism_types_content.strip()
+#         if cleaned_content.startswith("[") and cleaned_content.endswith("]"):
+#             cleaned_content = cleaned_content[1:-1]
+        
+#         organism_pairs_list = []
+#         if cleaned_content:
+#             organism_pairs_list = cleaned_content.split(';')
+
+#         for pair_str in organism_pairs_list:
+#             pair_str_stripped = pair_str.strip()
+#             if not pair_str_stripped:
+#                 continue
+            
+#             try:
+#                 parts = pair_str_stripped.split('->')
+#                 if len(parts) != 2:
+#                     continue
+                
+#                 organism_name = parts[0].strip()
+#                 organism_type = parts[1].strip()
+
+#                 if not organism_name or not organism_type:
+#                     continue
+
+#                 supported_types = {"Bacilo", "Cocco", "Helicoide"}
+#                 if organism_type not in supported_types:
+#                     continue
+                
+#                 organism_name_for_code = organism_name.replace('.', '_')
+                                
+#                 template_comp_filename = f"{organism_type}Component.cs"
+#                 source_comp_path = os.path.join(template_folder, "Assets", "Scripts", "Components", template_comp_filename)
+#                 dest_comp_filename = f"{organism_name}Component.cs" 
+#                 dest_comp_path = os.path.join(assets_scripts_components, dest_comp_filename)
+
+#                 if os.path.exists(source_comp_path):
+#                     try:
+#                         with open(source_comp_path, "r", encoding="utf-8") as f_template_comp:
+#                             template_text_comp = f_template_comp.read()
+#                         modified_content_comp = template_text_comp.replace(organism_type, organism_name_for_code)
+#                         with open(dest_comp_path, "w", encoding="utf-8") as f_out_comp:
+#                             f_out_comp.write(modified_content_comp)
+#                         files_processed.append(dest_comp_path)
+#                     except Exception:
+#                         pass
+                
+#                 template_sys_filename = f"{organism_type}System.cs"
+#                 source_sys_path = os.path.join(template_folder, "Assets", "Scripts", "Systems", template_sys_filename)
+#                 dest_sys_filename = f"{organism_name}System.cs"
+#                 dest_sys_path = os.path.join(assets_scripts_systems, dest_sys_filename)
+
+#                 if os.path.exists(source_sys_path):
+#                     try:
+#                         with open(source_sys_path, "r", encoding="utf-8") as f_template_sys:
+#                             template_text_sys = f_template_sys.read()
+#                         modified_content_sys = template_text_sys.replace(organism_type, organism_name_for_code)
+#                         with open(dest_sys_path, "w", encoding="utf-8") as f_out_sys:
+#                             f_out_sys.write(modified_content_sys)
+#                         files_processed.append(dest_sys_path)
+#                     except Exception:
+#                         pass
+#             except Exception:
+#                 pass
+    
+#     generated_files_basenames = set()
+#     for fp_processed in files_processed:
+#         generated_files_basenames.add(os.path.basename(fp_processed))
+
+#     template_type_base_names = ["Bacilo", "Cocco", "Helicoide"]
+
+#     for template_base_name in template_type_base_names:
+#         template_component_filename_to_check = f"{template_base_name}Component.cs"
+#         if template_component_filename_to_check not in generated_files_basenames:
+#             file_path_to_remove = os.path.join(assets_scripts_components, template_component_filename_to_check)
+#             if os.path.exists(file_path_to_remove):
+#                 try:
+#                     os.remove(file_path_to_remove)
+#                 except OSError:
+#                     pass
+
+#         template_system_filename_to_check = f"{template_base_name}System.cs"
+#         if template_system_filename_to_check not in generated_files_basenames:
+#             file_path_to_remove = os.path.join(assets_scripts_systems, template_system_filename_to_check)
+#             if os.path.exists(file_path_to_remove):
+#                 try:
+#                     os.remove(file_path_to_remove)
+#                 except OSError:
+#                     pass
+                
+#     return bool(files_processed)
 
 DELIMITER = "%|%"
 try:

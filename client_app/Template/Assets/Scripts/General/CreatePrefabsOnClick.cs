@@ -772,9 +772,54 @@ public class CreatePrefabsOnClick : MonoBehaviour
 
             CreateSingleEntity(sourcePrefabGO.name, bakedPrefabEntity, spawnPos, randomRotation, originalScale);}}
 
-    //CODE START
-    
-    //CODE END
+        private void CreateSingleEntity(string prefabName, Entity bakedPrefabEntityToInstantiate, Vector3 spawnWorldPosition, quaternion desiredWorldRotation, float originalPrefabScale)
+    {
+        quaternion originalPrefabRotation = entityManager.GetComponentData<LocalTransform>(bakedPrefabEntityToInstantiate).Rotation;
+        quaternion newCombinedRotation = math.mul(originalPrefabRotation, desiredWorldRotation);
+        Entity newEntity = entityManager.Instantiate(bakedPrefabEntityToInstantiate);
+        entityManager.SetComponentData(newEntity, new LocalTransform 
+        { 
+            Position = (float3)spawnWorldPosition, 
+            Rotation = newCombinedRotation, 
+            Scale = originalPrefabScale 
+        });
+        //if_else_block START
+
+        //if_else_block END
+        AddPhysicsComponents(newEntity, prefabName, originalPrefabScale);
+    }
+
+    private void AddPhysicsComponents(Entity e, string prefabName, float scale)
+    {
+        BlobAssetReference<Unity.Physics.Collider> colliderAsset = default;
+        PhysicsMaterial physicsMat = default;
+        physicsMat.Restitution = 0f;
+
+        switch (prefabName)
+        {   
+            //case statements START
+            
+            //case statements END
+            default:
+                Debug.LogWarning($"AddPhysicsComponents: No specific collider defined for {prefabName}. Using default sphere.");
+                colliderAsset = Unity.Physics.SphereCollider.Create(new SphereGeometry
+                {
+                    Center = float3.zero, Radius = scale * 0.1f 
+                }, CollisionFilter.Default, physicsMat);
+                break; 
+        }
+
+        if (colliderAsset.IsCreated)
+        {
+            entityManager.AddComponentData(e, new PhysicsCollider { Value = colliderAsset });
+            var massProperties = colliderAsset.Value.MassProperties;
+            entityManager.AddComponentData(e, PhysicsMass.CreateDynamic(massProperties, 1f)); 
+            entityManager.AddComponentData(e, new PhysicsVelocity { Linear = float3.zero, Angular = float3.zero });
+            entityManager.AddComponentData(e, new PhysicsGravityFactor { Value = 1f }); 
+            entityManager.AddComponentData(e, new PhysicsDamping { Linear = 0.05f, Angular = 0.05f }); 
+        }
+        else Debug.LogError($"Failed to create physics collider for {prefabName}.");
+    }
 
     private void OnAllPrefabsPlaced() 
     {
