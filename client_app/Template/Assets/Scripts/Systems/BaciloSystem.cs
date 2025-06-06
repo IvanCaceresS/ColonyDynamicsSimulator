@@ -97,6 +97,7 @@ public partial class BaciloSystem : SystemBase
                 }
                 else organism.Parent=Entity.Null;
             }
+            transform.Position.y = math.max(transform.Position.y, -0.75f);
             ecb.SetComponent(entityInQueryIndex, entity, transform);
             ecb.SetComponent(entityInQueryIndex, entity, organism);
         }).ScheduleParallel(Dependency);
