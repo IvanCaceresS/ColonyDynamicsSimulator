@@ -821,6 +821,62 @@ public class CreatePrefabsOnClick : MonoBehaviour
         else Debug.LogError($"Failed to create physics collider for {prefabName}.");
     }
 
+    private BlobAssetReference<Unity.Physics.Collider> CreateHelicalCollider(float length, PhysicsMaterial physicsMat)
+    {
+        float axialLength = Mathf.Clamp(length, 5f, 50f);
+        float helixRadius = 0.5f;
+        float tubeRadius = 0.1f;
+        float turns = axialLength * 0.3f;
+        int colliderSegments = Mathf.Clamp((int)(axialLength * 2), 10, 40);
+        var heliColliders = new NativeList<CompoundCollider.ColliderBlobInstance>(colliderSegments, Allocator.Temp);
+        BlobAssetReference<Unity.Physics.Collider> finalColliderAsset;
+        try
+        {
+            float segmentLength = axialLength / colliderSegments;
+            float angularChangePerUnitY = (axialLength > 0) ? (turns * 2 * Mathf.PI / axialLength) : 0f;
+            for (int i = 0; i < colliderSegments; i++)
+            {
+                float yPos = -axialLength / 2.0f + segmentLength * (i + 0.5f);
+                float helixAngleAtY = yPos * angularChangePerUnitY;
+                float3 sphereCenter = new float3(
+                    helixRadius * math.cos(helixAngleAtY),
+                    yPos,
+                    helixRadius * math.sin(helixAngleAtY)
+                );
+                BlobAssetReference<Unity.Physics.Collider> sphereBlob = Unity.Physics.SphereCollider.Create(
+                    new SphereGeometry { Center = float3.zero, Radius = tubeRadius },
+                    CollisionFilter.Default,
+                    physicsMat
+                );
+                heliColliders.Add(new CompoundCollider.ColliderBlobInstance
+                {
+                    Collider = sphereBlob,
+                    CompoundFromChild = new RigidTransform(quaternion.identity, sphereCenter)
+                });
+            }
+            
+            if (heliColliders.IsCreated && heliColliders.Length > 0)
+            {
+                finalColliderAsset = CompoundCollider.Create(heliColliders.AsArray());
+            }
+            else
+            {
+                finalColliderAsset = Unity.Physics.CapsuleCollider.Create(new CapsuleGeometry
+                {
+                    Vertex0 = new float3(0, -axialLength / 2f, 0),
+                    Vertex1 = new float3(0, axialLength / 2f, 0),
+                    Radius = helixRadius + tubeRadius
+                }, CollisionFilter.Default, physicsMat);
+            }
+        }
+        finally
+        {
+            if(heliColliders.IsCreated) heliColliders.Dispose();
+        }
+
+        return finalColliderAsset;
+    }
+
     private void OnAllPrefabsPlaced() 
     {
         if (messageText != null) messageText.text = "All configured colonies placed. Setup complete.";

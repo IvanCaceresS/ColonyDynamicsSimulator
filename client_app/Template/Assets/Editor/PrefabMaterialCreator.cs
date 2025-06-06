@@ -53,9 +53,22 @@ public static class PrefabMaterialCreator
         Object.DestroyImmediate(o);
         Debug.Log($"Prefab '{n}' created at '{pP}' with material '{mP}'");
     }
-    static void CPAM_Helical(string name, float axialLength, float helixRadius, float tubeRadius, int segmentsAlongHelix, int segmentsAroundTube, float totalTurns, Vector3 rotation, Color color)
+    static void CPAM_Helical(string name, float axialLength, Vector3 rotation, Color color)
     {
-        if (segmentsAlongHelix < 2 || segmentsAroundTube < 3) { Debug.LogError("segmentsAlongHelix must be >= 2 and segmentsAroundTube >= 3 to generate the mesh."); return; }
+        axialLength = Mathf.Clamp(axialLength, 5f, 30f);
+
+        float helixRadius = 0.5f;
+        float tubeRadius = 0.1f;
+        float totalTurns = axialLength * 0.3f;
+        
+        int segmentsAlongHelix = Mathf.Clamp((int)(axialLength * 3), 10, 500);
+        int segmentsAroundTube = Mathf.Clamp((int)(axialLength * 1.5f), 5, 50);
+
+        if (segmentsAlongHelix < 2 || segmentsAroundTube < 3)
+        {
+            Debug.LogError($"Los segmentos calculados son insuficientes para generar la malla '{name}'. Se requieren al menos 2 segmentos de hélice y 3 de tubo.");
+            return;
+        }
 
         GameObject HeliGO = new GameObject(name);
         HeliGO.transform.rotation = Quaternion.Euler(rotation); // Apply rotation

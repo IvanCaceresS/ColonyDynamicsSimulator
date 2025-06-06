@@ -502,59 +502,25 @@ def separar_codigos_por_archivo(respuesta: str) -> Dict[str, str]:
     return codigos
 
 def get_collider_templates() -> dict:
+    """
+    Devuelve las plantillas de código C# para los colliders de cada morfología.
+    Ahora utilizan placeholders (ej: __LENGTH__) para ser reemplazados dinámicamente.
+    """
     return {
         "Bacilo": textwrap.dedent("""
             colliderAsset = Unity.Physics.CapsuleCollider.Create(new CapsuleGeometry
             {
-                Vertex0 = new float3(0, -scale * 0.5f, 0), Vertex1 = new float3(0, scale * 0.5f, 0), Radius = scale * 0.25f
+                Vertex0 = new float3(0, -__LENGTH__ * 0.5f, 0), Vertex1 = new float3(0, __LENGTH__ * 0.5f, 0), Radius = __RADIUS__
             }, CollisionFilter.Default, physicsMat);
         """).strip(),
         "Cocco": textwrap.dedent("""
             colliderAsset = Unity.Physics.SphereCollider.Create(new SphereGeometry
             {
-                Center = float3.zero, Radius = scale * 0.1f
+                Center = float3.zero, Radius = 0.5f
             }, CollisionFilter.Default, physicsMat);
         """).strip(),
         "Helicoide": textwrap.dedent("""
-            const float axialLength = 10f;
-            const float helixRadius = 0.5f;
-            const float tubeRadius = 0.1f;
-            const float turns = 3f;
-            const int colliderSegments = 20;
-            NativeList<CompoundCollider.ColliderBlobInstance> heliColliders = new NativeList<CompoundCollider.ColliderBlobInstance>(colliderSegments, Allocator.Temp);
-            float segmentLength = axialLength / colliderSegments;
-            float angularChangePerUnitY = (axialLength > 0) ? (turns * 2 * Mathf.PI / axialLength) : 0f;
-            float subColliderActualRadius = tubeRadius;
-            for (int i = 0; i < colliderSegments; i++)
-            {
-                float yPos = -axialLength / 2.0f + segmentLength * (i + 0.5f);
-                float helixAngleAtY = yPos * angularChangePerUnitY;
-                float3 sphereCenter = new float3(
-                    helixRadius * math.cos(helixAngleAtY),
-                    yPos,
-                    helixRadius * math.sin(helixAngleAtY)
-                );
-                BlobAssetReference<Unity.Physics.Collider> sphereBlob = Unity.Physics.SphereCollider.Create(
-                    new SphereGeometry { Center = float3.zero, Radius = subColliderActualRadius },
-                    CollisionFilter.Default,
-                    physicsMat
-                );
-                heliColliders.Add(new CompoundCollider.ColliderBlobInstance
-                {
-                    Collider = sphereBlob,
-                    CompoundFromChild = new RigidTransform(quaternion.identity, sphereCenter)
-                });
-            }
-            if (heliColliders.IsCreated && heliColliders.Length > 0) colliderAsset = Unity.Physics.CompoundCollider.Create(heliColliders.AsArray());
-            else
-            {
-                colliderAsset = Unity.Physics.CapsuleCollider.Create(new CapsuleGeometry{
-                    Vertex0 = new float3(0, -axialLength/2f, 0),
-                    Vertex1 = new float3(0, axialLength/2f, 0),
-                    Radius = helixRadius + tubeRadius
-                }, CollisionFilter.Default, physicsMat);
-            }
-            if(heliColliders.IsCreated) heliColliders.Dispose();
+            colliderAsset = CreateHelicalCollider(__MAX_AXIAL_LENGTH__, physicsMat);
         """).strip()
     }
 
@@ -584,51 +550,96 @@ def parse_organism_data(input_str: str) -> list:
 
 def generate_csharp_switch_cases(organism_data: list, templates: dict) -> str:
     """
-    Genera los bloques 'case' del switch, agrupando organismos por morfología
-    para evitar la redeclaración de variables.
+    Genera los bloques 'case' del switch. Cada organismo tiene su propio 'case'
+    para permitir parámetros de collider únicos.
     """
-    grouped_by_morphology = {}
-    
-    # Paso 1: Agrupar los nombres de los organismos por su morfología.
-    for organism in organism_data:
-        morphology = organism['morphology']
-        if morphology not in grouped_by_morphology:
-            grouped_by_morphology[morphology] = []
-        grouped_by_morphology[morphology].append(organism['name'])
-        
     final_case_blocks = []
     
-    # Paso 2: Generar un bloque de código por cada grupo.
-    for morphology, names in grouped_by_morphology.items():
-        # Crear todas las etiquetas 'case' para este grupo.
-        case_labels = [f'            case "{name}":' for name in names]
-        case_labels_str = "\n".join(case_labels)
+    # Iteramos sobre cada organismo individualmente en lugar de agrupar.
+    for organism in organism_data:
+        name = organism['name']
+        morphology = organism['morphology']
+        params = organism['params']
         
-        # Obtener la plantilla de código para la morfología actual.
         code_template = templates.get(morphology)
         
-        if code_template:
-            # Indentar el cuerpo del código.
-            indented_body = textwrap.indent(code_template, ' ' * 16)
-            
-            # Construir el bloque completo.
-            full_block = f"{case_labels_str}\n{indented_body}\n                break;"
-            final_case_blocks.append(full_block)
-        else:
+        if not code_template:
             # Manejar morfologías desconocidas si es necesario.
-            case_labels_str = "\n".join([f'            case "{name}":' for name in names])
-            full_block = f"{case_labels_str}\n                // Morfología '{morphology}' no implementada.\n                break;"
+            case_label = f'            case "{name}":'
+            body = f"// Morfología '{morphology}' no implementada."
+            full_block = f"{case_label}\n                {body}\n                break;"
             final_case_blocks.append(full_block)
+            continue
+
+        # Realizar el reemplazo de placeholders basado en la morfología.
+        body = ""
+        try:
+            if morphology == "Bacilo":
+                # Extrae los valores de Length y Radius de los parámetros.
+                length_val = params['Length']
+                radius_val = params['Radius']
+                body = code_template.replace('__LENGTH__', length_val).replace('__RADIUS__', radius_val)
+            
+            elif morphology == "Helicoide":
+                # Extrae el valor de MaxAxialLength.
+                max_length_val = params['MaxAxialLength']
+                body = code_template.replace('__MAX_AXIAL_LENGTH__', max_length_val)
+            
+            else:
+                # Si la morfología tiene una plantilla pero no una lógica de reemplazo.
+                body = code_template
+
+        except KeyError as e:
+            # Error si un parámetro requerido no se encuentra en la entrada.
+            print(f"Warning: Parameter {e} not found for organism '{name}'. Skipping collider generation for this case.")
+            body = f"// Error: Parámetro {e} faltante para {name}."
+
+        # Construir el bloque 'case' completo.
+        case_label = f'            case "{name}":'
+        indented_body = textwrap.indent(body, ' ' * 16) # 16 espacios para indentar dentro del case
+        
+        full_block = f"{case_label}\n{indented_body}\n                break;"
+        final_case_blocks.append(full_block)
             
     return "\n\n".join(final_case_blocks)
 
 def generate_csharp_if_else_block(organism_data: list) -> str:
+    """
+    Genera el bloque if/else para añadir componentes.
+    Excluye los parámetros geométricos específicos de cada morfología,
+    pero mantiene los parámetros necesarios para la simulación (como MaxAxialLength).
+    """
+    # Mapea cada morfología a los parámetros que deben ser excluidos de su componente.
+    # Usamos un diccionario para manejar la lógica condicional.
+    EXCLUDED_PARAMS_BY_MORPHOLOGY = {
+        "Bacilo": {"Radius", "Length"},
+        "Cocco": {"Diameter"},
+        # Para "Helicoide", no excluimos nada de esta lista, ya que
+        # MaxAxialLength es necesario para la simulación de crecimiento.
+        # No es necesario añadir "Helicoide": set() pero lo hace más explícito.
+        "Helicoide": set()
+    }
+    
     blocks = []
     param_indent = ' ' * 16
     for i, organism in enumerate(organism_data):
         name = organism['name']
-        param_lines = [f"{param_indent}{key} = {value}," for key, value in organism['params'].items()]
-        if param_lines: param_lines[-1] = param_lines[-1][:-1]
+        morphology = organism['morphology']
+        
+        # Obtiene el conjunto de parámetros a excluir para la morfología actual.
+        # Si la morfología no está en el mapa, por defecto no se excluye nada.
+        params_to_exclude = EXCLUDED_PARAMS_BY_MORPHOLOGY.get(morphology, set())
+        
+        # Filtra los parámetros, excluyendo los que corresponden a esta morfología.
+        param_lines = [
+            f"{param_indent}{key} = {value},"
+            for key, value in organism['params'].items()
+            if key not in params_to_exclude
+        ]
+        
+        # Elimina la coma del último elemento.
+        if param_lines: 
+            param_lines[-1] = param_lines[-1].rstrip(',')
         
         params_code = "\n".join(param_lines)
         keyword = "if" if i == 0 else "else if"
@@ -642,6 +653,7 @@ def generate_csharp_if_else_block(organism_data: list) -> str:
                 }});
             }}""")
         blocks.append(block.strip())
+        
     return "\n        ".join(blocks)
 
 def import_codes(codes: Dict[str, str], simulation_name: str) -> bool:

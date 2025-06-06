@@ -91,6 +91,16 @@ public partial class HelicoideSystem : SystemBase
             }
             else 
             {
+                if (organism.IsInitialCell && !organism.InitialPositionSet)
+                {
+                    transform.Position.y = 2f;
+                    float randomHorizontalAngleRad = organism.RandomState.NextFloat(0f, 2f * math.PI);
+                    quaternion randomYawRotation = quaternion.Euler(0, randomHorizontalAngleRad, 0);
+                    quaternion lieDownRotation = quaternion.Euler(0, 0, math.radians(90f));
+                    transform.Rotation = math.mul(lieDownRotation, randomYawRotation);
+                    organism.InitialPositionSet = true;
+                }
+
                 bool parentIsWaitingOrJustDivided = false;
                 if (!organism.IsInitialCell) parentIsWaitingOrJustDivided = organism.GrowthTime < organism.GrowthDuration && organism.GrowthDuration > 0.001f;
                 if (organism.ForwardSpeed > 0.0001f && !parentIsWaitingOrJustDivided)
@@ -127,6 +137,8 @@ public partial class HelicoideSystem : SystemBase
                     uint childSeed = (uint)(entity.Index ^ entity.Version ^ entityInQueryIndex ^ organism.RandomState.NextUInt()) + (uint)(elapsedTimeForSeed * 1000.0f) + 2;
                     cd.RandomState = new Unity.Mathematics.Random(childSeed == 0 ? 1u : childSeed); 
                     cd.SeparationSign = cd.RandomState.NextBool() ? 1 : -1;
+                    cd.InitialPositionSet = false;
+                    
                     ecb.SetComponent(entityInQueryIndex, newChildEntity, cd);
                     organism.TimeSinceLastDivision = 0f;
                     organism.GrowthTime = 0f; 
@@ -152,4 +164,5 @@ public partial class HelicoideSystem : SystemBase
         ecbSystem.AddJobHandleForProducer(Dependency);
         Dependency = parentMap.Dispose(Dependency);
     }
+
 }
