@@ -862,9 +862,9 @@ def api_manager(sim_name: str, sim_desc: str, use_cache: bool = True) -> Tuple[b
         return False, "Validation Model Error: The API returned an empty response."
     fmt_q_s = fmt_q.strip()
     if fmt_q_s == "ERROR DE CONTENIDO":
-        return False, "Validation Failed: The description contains disallowed organisms or topics. Only EColi, SCerevisiae, or both are allowed."
+        return False, "Validation Failed: The description contains content that is not suitable for a simulation of organisms with morphology (Bacilo, Cocco, Helicoide)."
     if fmt_q_s == "ERROR CANTIDAD EXCEDIDA":
-        return False, "Validation Failed: More than 2 organisms were requested. Maximum limit: 2."
+        return False, "Validation Failed: More than 5 organisms were requested. Maximum limit: 5."
     if fmt_q_s == "ERROR MORFOLOGIA NO ACEPTADA":
         return False, "Validation Failed: The organism's morphology is not accepted or is not one of the allowed types (Bacilo, Cocco, Helicoide)."
     if fmt_q_s.upper().startswith("ERROR"):
