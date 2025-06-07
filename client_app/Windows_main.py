@@ -728,7 +728,7 @@ def import_codes(codes: Dict[str, str], simulation_name: str) -> bool:
 
             # --- 2b. Generar archivos de Componente y Sistema ---
             for org in organisms:
-                name, morph = org['name'], org['morphology']
+                name, morph, params = org['name'], org['morphology'], org['params']
                 for file_type in ["Component", "System"]:
                     template_file = f"{morph}{file_type}.cs"
                     source_path = os.path.join(template_folder, "Assets", "Scripts", f"{file_type}s", template_file)
@@ -737,7 +737,18 @@ def import_codes(codes: Dict[str, str], simulation_name: str) -> bool:
                         dest_file = f"{name}{file_type}.cs"
                         dest_path = os.path.join(assets_scripts_folder, f"{file_type}s", dest_file)
                         with open(source_path, "r", encoding='utf-8') as f_tpl:
-                            tpl_text = f_tpl.read().replace(morph, name)
+                            tpl_text = f_tpl.read()
+                            # Siempre reemplazar el nombre de la morfología por el del organismo
+                            tpl_text = tpl_text.replace(morph, name)
+                            
+                            # Si es un Bacilo y estamos creando el archivo System, reemplazar el placeholder del largo.
+                            if morph == "Bacilo" and file_type == "System":
+                                try:
+                                    length_val = params['Length']
+                                    tpl_text = tpl_text.replace('__LENGTH__', length_val)
+                                except KeyError:
+                                    print(f"Warning: 'Length' parameter not found for Bacilo '{name}'. Placeholder __LENGTH__ will not be replaced in {dest_file}.")
+
                         with open(dest_path, "w", encoding='utf-8') as f_dst:
                             f_dst.write(tpl_text)
                         files_processed.append(dest_path)
@@ -758,9 +769,8 @@ def import_codes(codes: Dict[str, str], simulation_name: str) -> bool:
                         print(f"Cleaned up unused template file: '{filename_to_check}'.")
                     except OSError as e:
                         print(f"Error cleaning up template file '{filename_to_check}': {e}")
-                
+                        
     return bool(files_processed)
-
 DELIMITER = "%|%"
 try:
     APP_DATA_DIR = Path.home() / "Documents" / "UnitySimulationManagerData"

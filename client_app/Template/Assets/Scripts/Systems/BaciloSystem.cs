@@ -85,7 +85,7 @@ public partial class BaciloSystem : SystemBase
                 if(transform.Scale<organism.SeparationThreshold*maxScale)
                 {
                     float sp=math.smoothstep(0f,1f,math.clamp(transform.Scale/(organism.SeparationThreshold*maxScale),0f,1f));
-                    float off=math.lerp(0f,0.9f+organism.SeparationThreshold,sp);
+                    float off=math.lerp(0f,__LENGTH__+organism.SeparationThreshold,sp);
                     float3 sd=math.mul(pd.Rotation,new float3(0,organism.SeparationSign,0));
                     transform.Position=pd.Position+sd*off;
                     transform.Rotation=pd.Rotation;
