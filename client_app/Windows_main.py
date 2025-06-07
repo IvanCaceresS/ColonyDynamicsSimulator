@@ -874,6 +874,42 @@ def get_cached_response(prompt: str) -> Union[str, None]:
         return None
     return None
 
+def clear_api_cache():
+    """Asks for confirmation and deletes the Responses.csv cache file."""
+    if 'RESPONSES_CSV' not in globals() or RESPONSES_CSV is None:
+        messagebox.showerror("Configuration Error", "Cache file path is not defined. Cannot clear.")
+        return
+
+    # User confirmation dialog in English
+    confirm = messagebox.askyesno(
+        "Confirm Cache Deletion",
+        f"Are you sure you want to permanently delete the API response cache file?\n\n({RESPONSES_CSV})\n",
+        icon='warning'
+    )
+
+    if not confirm:
+        update_status("Cache deletion cancelled by user.")
+        return
+
+    try:
+        if RESPONSES_CSV.is_file():
+            RESPONSES_CSV.unlink()
+            messagebox.showinfo("Success", "The cache file (Responses.csv) has been successfully deleted.")
+            update_status("API response cache cleared.")
+        else:
+            messagebox.showinfo("Information", "The cache file did not exist. Nothing was deleted.")
+            update_status("Cache clear attempted, but the file did not exist.")
+    except PermissionError:
+        messagebox.showerror(
+            "Permission Error",
+            f"Could not delete the file. Please ensure it is not open in another program (e.g., Excel) and that you have write permissions.\n\nPath: {RESPONSES_CSV}"
+        )
+        update_status("Permission error while clearing cache.")
+    except Exception as e:
+        messagebox.showerror("Unexpected Error", f"An unexpected error occurred while trying to delete the cache file:\n\n{e}")
+        update_status(f"Unexpected error while clearing cache: {e}")
+
+
 def api_manager(sim_name: str, sim_desc: str, use_cache: bool = True) -> Tuple[bool, Union[str, None]]:
     if not API_BASE_URL:
         return False, "Configuration Error: The API base URL (API_BASE_URL) is not defined."
@@ -2305,6 +2341,7 @@ def update_button_states():
         return "normal" if enabled_condition else "disabled"
     settings_enabled = not is_build_running
     verify_enabled = not is_build_running
+    clear_cache_enabled = not is_build_running
     unity_down_enabled = not is_build_running
     about_enabled = not is_build_running
     theme_switch_enabled = not is_build_running
@@ -2326,6 +2363,7 @@ def update_button_states():
              settings_btn.configure(state=get_state(settings_enabled))
 
         if 'verify_btn' in globals(): verify_btn.configure(state=get_state(verify_enabled), fg_color=BTN_VERIFY_FG_COLOR[mode_idx] if verify_enabled else disabled_fg)
+        if 'clear_cache_btn' in globals(): clear_cache_btn.configure(state=get_state(clear_cache_enabled), fg_color=BTN_EXIT_FG_COLOR[mode_idx] if clear_cache_enabled else disabled_fg)
         if 'unity_down_btn' in globals(): unity_down_btn.configure(state=get_state(unity_down_enabled), fg_color=BTN_UNITY_DOWN_FG_COLOR[mode_idx] if unity_down_enabled else disabled_fg)
         if 'about_btn' in globals(): about_btn.configure(state=get_state(about_enabled), fg_color=BTN_ABOUT_FG_COLOR[mode_idx] if about_enabled else disabled_fg)
         if 'exit_btn' in globals(): exit_btn.configure(state=get_state(exit_enabled), fg_color=BTN_EXIT_FG_COLOR[mode_idx] if exit_enabled else disabled_fg)
@@ -2729,6 +2767,17 @@ settings_btn.pack(fill="x", padx=15, pady=5)
 verify_btn = ctk.CTkButton(sidebar_frame, text="Verify Config", command=lambda: perform_verification(show_results_box=True), font=APP_FONT,
                                 fg_color=BTN_VERIFY_FG_COLOR[mode_idx], hover_color=BTN_VERIFY_HOVER_COLOR[mode_idx], text_color=BTN_VERIFY_TEXT_COLOR[mode_idx])
 verify_btn.pack(fill="x", padx=15, pady=5)
+
+global clear_cache_btn
+clear_cache_btn = ctk.CTkButton(sidebar_frame, text="Clear API Cache",
+                                 command=clear_api_cache,
+                                 font=APP_FONT,
+                                 fg_color=BTN_EXIT_FG_COLOR[mode_idx],
+                                 hover_color=BTN_EXIT_HOVER_COLOR[mode_idx],
+                                 text_color=BTN_EXIT_TEXT_COLOR[mode_idx])
+clear_cache_btn.pack(fill="x", padx=15, pady=5)
+
+
 separator = ctk.CTkFrame(sidebar_frame, height=2, fg_color="gray")
 separator.pack(fill="x", padx=15, pady=15)
 unity_down_btn = ctk.CTkButton(sidebar_frame, text="Download Unity Editor",
