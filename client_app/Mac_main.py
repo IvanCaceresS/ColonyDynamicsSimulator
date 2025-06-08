@@ -1080,15 +1080,15 @@ def open_graphs_folder(simulation_name):
     if not simulation_data_dir:
         messagebox.showerror("Error", f"Could not find the data directory for simulation '{simulation_name}'.\nCannot open the graphics folder.")
         return
-    graphs_folder_path = simulation_data_dir / GRAPHICS_SUBFOLDER
+    folder_to_open = simulation_data_dir
     try:
-        graphs_folder_path.mkdir(parents=True, exist_ok=True)
-        subprocess.Popen(["open", str(graphs_folder_path)])
+        (folder_to_open / GRAPHICS_SUBFOLDER).mkdir(parents=True, exist_ok=True)
+        subprocess.Popen(["open", str(folder_to_open)])
     except FileNotFoundError:
          cmd = 'open'
          messagebox.showerror("System Error", f"Could not find the system command ('{cmd}') to open the folder on this OS (Darwin).")
     except Exception as e:
-         messagebox.showerror("Error", f"Could not open the graphics folder:\n{graphs_folder_path}\n\nError: {e}")
+         messagebox.showerror("Error", f"Could not open the graphics folder:\n{folder_to_open}\n\nError: {e}")
          traceback.print_exc()
 
 def get_folder_size(path: Union[str, Path]) -> int:
