@@ -21,11 +21,12 @@ import math
 from PIL import Image, ImageTk
 import re
 import requests
-from typing import Union, Tuple, Dict, Optional
+from typing import Union, Tuple, Dict, List, Any, Optional, Callable
 import numpy as np
 from scipy.optimize import curve_fit
 from sklearn.metrics import r2_score
 
+# --- App Configuration (Shared) ---
 unity_path_ok = False
 unity_version_ok = False
 unity_projects_path_ok = False
@@ -35,8 +36,9 @@ initial_verification_complete = False
 is_build_running = False
 UNITY_EXECUTABLE = None
 UNITY_PROJECTS_PATH = None
+API_BASE_URL = None
+API_KEY = None
 UNITY_REQUIRED_VERSION_STRING = "6000.0.32f1"
-SIMULATIONS_DIR = Path("./Simulations")
 SIMULATION_PROJECT_NAME = "Simulation"
 SIMULATION_PROJECT_PATH = None
 ASSETS_FOLDER = None
@@ -44,6 +46,8 @@ STREAMING_ASSETS_FOLDER = None
 SIMULATION_LOADED_FILE = None
 last_simulation_loaded = None
 all_simulations_data = []
+
+# --- UI and Theming (Shared) ---
 play_icon_text = "▶"
 delete_icon_text = "🗑️"
 loaded_indicator_text = "✓"
@@ -51,9 +55,8 @@ tooltip_window = None
 tooltip_delay = 700
 tooltip_job_id = None
 logo_photo_ref = None
-ICON_PATH_WIN = "img/icon.ico"
-LOGO_PATHS = ["img/logo_light.png", "img/logo_dark.png"]
-LOGO_WIDTH = 200
+settings_button_blink_job = None
+
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 APP_FONT = ("Segoe UI", 11)
@@ -68,7 +71,18 @@ COLOR_INFO_GENERAL = ("#218838", "#66BB6A")
 COLOR_WARNING_GENERAL = ("#E53935", "#E53935")
 COLOR_DISABLED_GENERAL = ("#BDBDBD", "#757575")
 COLOR_SIDEBAR_BG = None
-settings_button_blink_job = None
+
+# --- OS-Specific Configuration ---
+if getattr(sys, 'frozen', False):
+    APP_BASE_DIR = Path(sys.executable).resolve().parent
+else:
+    APP_BASE_DIR = Path(__file__).resolve().parent
+
+SIMULATIONS_DIR = APP_BASE_DIR / "Simulations"
+DOTENV_PATH = APP_BASE_DIR / ".env"
+ICON_PATH_WIN = APP_BASE_DIR / "img" / "icon.ico"
+LOGO_PATHS = [APP_BASE_DIR / "img" / "logo_light.png", APP_BASE_DIR / "img" / "logo_dark.png"]
+LOGO_WIDTH = 200
 
 def get_color_mode_index():
     return 1 if ctk.get_appearance_mode() == "Dark" else 0
@@ -137,8 +151,7 @@ def find_unity_persistent_path(product_name: str) -> Union[Path, None]:
             return None
     except PermissionError:
         return None
-    except Exception as e:
-        traceback.print_exc()
+    except Exception:
         return None
 
 def find_simulation_data_path(simulation_name: str) -> Union[Path, None]:
@@ -163,7 +176,7 @@ def SimulationGraphics(simulation_name):
     output_folder = simulation_folder / GRAPHICS_SUBFOLDER
     try:
         output_folder.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
+    except OSError:
         return
     if not csv_path.is_file():
         return
@@ -173,8 +186,7 @@ def SimulationGraphics(simulation_name):
             return
     except pd.errors.EmptyDataError:
         return
-    except Exception as e:
-        traceback.print_exc()
+    except Exception:
         return
     try:
         df.columns = df.columns.str.strip()
@@ -187,8 +199,7 @@ def SimulationGraphics(simulation_name):
         if df.empty:
             return
         df.sort_values(by="Timestamp", inplace=True)
-    except Exception as e:
-        traceback.print_exc()
+    except Exception:
         return
     known_columns = {"Timestamp", "Timestamp_str", "FPS", "RealTime", "SimulatedTime", "DeltaTime", "FrameCount", "Pausado"}
     organism_columns = sorted([col for col in df.columns if col not in known_columns])
@@ -203,7 +214,7 @@ def SimulationGraphics(simulation_name):
         plt.tight_layout()
         try:
             plt.savefig(str(output_folder / "fps_over_time.png"))
-        except Exception as e:
+        except Exception:
             pass
         plt.close()
     if "RealTime" in df.columns and "SimulatedTime" in df.columns:
@@ -219,7 +230,7 @@ def SimulationGraphics(simulation_name):
         plt.tight_layout()
         try:
             plt.savefig(str(output_folder / "time_comparison.png"))
-        except Exception as e:
+        except Exception:
             pass
         plt.close()
     if organism_columns:
@@ -239,7 +250,7 @@ def SimulationGraphics(simulation_name):
             plt.tight_layout()
             try:
                 plt.savefig(str(output_folder / "organism_counts.png"))
-            except Exception as e:
+            except Exception:
                 pass
         plt.close()
     if "Organism count" in df.columns:
@@ -253,7 +264,7 @@ def SimulationGraphics(simulation_name):
         plt.tight_layout()
         try:
             plt.savefig(str(output_folder / "total_organisms.png"))
-        except Exception as e:
+        except Exception:
             pass
         plt.close()
     if "FrameCount" in df.columns:
@@ -267,7 +278,7 @@ def SimulationGraphics(simulation_name):
         plt.tight_layout()
         try:
             plt.savefig(str(output_folder / "frame_count.png"))
-        except Exception as e:
+        except Exception:
             pass
         plt.close()
     if "FPS" in df.columns and not df["FPS"].isnull().all():
@@ -280,7 +291,7 @@ def SimulationGraphics(simulation_name):
         plt.tight_layout()
         try:
             plt.savefig(str(output_folder / "fps_histogram.png"))
-        except Exception as e:
+        except Exception:
             pass
         plt.close()
     if "Organism count" in df.columns and "FPS" in df.columns and not df["Organism count"].isnull().all() and not df["FPS"].isnull().all():
@@ -301,7 +312,7 @@ def SimulationGraphics(simulation_name):
                 plt.tight_layout()
                 try:
                     plt.savefig(str(output_folder / "total_organisms_vs_fps.png"))
-                except Exception as e:
+                except Exception:
                     pass
                 plt.close()
     if "SimulatedTime" in df.columns and organism_columns:
@@ -356,9 +367,9 @@ def SimulationGraphics(simulation_name):
                             plt.plot(time_fit, organism_fit, label=label_fit, linestyle="--")
                         except RuntimeError:
                             pass
-                        except ValueError as ve:
+                        except ValueError:
                             pass
-                        except Exception as e:
+                        except Exception:
                             pass
             if plotted_something:
                 plt.title(f"Specific Organism Count & Exponential Fit over Simulated Time ({simulation_name})")
@@ -374,13 +385,9 @@ def SimulationGraphics(simulation_name):
                 try:
                     save_path = output_folder / "organisms_vs_simulated_time_fit.png"
                     plt.savefig(str(save_path))
-                except Exception as e:
+                except Exception:
                     pass
             plt.close()
-
-load_dotenv(dotenv_path="./.env")
-API_BASE_URL = os.getenv("API_BASE_URL")
-API_KEY = os.getenv("API_KEY")
 
 def _make_api_request(endpoint: str, data: Dict) -> Tuple[Dict, Optional[str]]:
     if not API_BASE_URL:
@@ -427,85 +434,29 @@ def call_primary_model_via_api(question: str) -> Tuple[str, int, int, Optional[s
         return "", 0, 0, f"API Error (primary): {resp['error']}"
     return resp.get('reply', ''), resp.get('input_tokens', 0), resp.get('output_tokens', 0), None
 
-def split_braces_outside_strings(code: str) -> str:
-    result_lines = []
-    in_string = False
-    for line in code.splitlines(keepends=True):
-        new_line_chars = []
-        i = 0
-        while i < len(line):
-            ch = line[i]
-            if ch == '"':
-                in_string = not in_string
-            elif ch in ['{', '}'] and not in_string:
-                new_line_chars.append(f'\n{ch}\n')
-            else:
-                new_line_chars.append(ch)
-            i += 1
-        result_lines.append(''.join(new_line_chars))
-    return ''.join(result_lines)
-
-def format_csharp(contenido: str) -> str:
-    # Esta función es segura para el código de PrefabMaterialCreator, ya que no suele tener ; dentro de strings.
-    preprocesado = split_braces_outside_strings(contenido)
-    preprocesado = re.sub(r';', r';\n', preprocesado)
-    preprocesado = re.sub(r'\n\s*\n', '\n', preprocesado)
-    lineas = [l.strip() for l in preprocesado.split('\n') if l.strip()]
-    nivel_indentacion = 0
-    contenido_formateado = []
-    indent_char = "    "
-    for linea in lineas:
-        if linea.startswith("}"):
-            nivel_indentacion = max(nivel_indentacion - 1, 0)
-        contenido_formateado.append(indent_char * nivel_indentacion + linea)
-        if linea.endswith("{"):
-            nivel_indentacion += 1
-    return "\n".join(contenido_formateado)
-
 def _insert_code_between_markers(template_content: str, code_to_insert: str, start_marker: str, end_marker: str) -> Union[str, None]:
-    """
-    Inserta un bloque de código entre dos marcadores de forma segura,
-    sin que el motor de regex interprete el contenido del código.
-    """
-    # Patrón para encontrar el bloque completo, incluyendo los marcadores
     pattern = re.compile(re.escape(start_marker) + r'.*?' + re.escape(end_marker), re.DOTALL)
-    
     match = pattern.search(template_content)
-    
     if not match:
-        # Si no se encuentran los marcadores, no se hace nada.
         return None
-
-    # Construir la nueva cadena manualmente es la forma más segura
     start_index = match.start()
     end_index = match.end()
-    
     new_block = f"{start_marker}\n{code_to_insert}\n{end_marker}"
-    
     return template_content[:start_index] + new_block + template_content[end_index:]
 
 def separar_codigos_por_archivo(respuesta: str) -> Dict[str, str]:
     actual_content = respuesta.strip().strip('"')
-    # Usamos el formato de 2 partes que definimos
     regex_especifico = r"1\.PrefabMaterialCreator\.cs\{(.*?)\}2\.OrganismTypes\{(.*?)\}"
     match = re.search(regex_especifico, actual_content, re.DOTALL)
-
     codigos = {}
     if match:
-        # No formateamos el código de PMC aquí, porque es una sola línea de llamadas
-        # que no se beneficia del formateador y evita posibles errores.
         codigos["PrefabMaterialCreator.cs"] = match.group(1).strip()
         codigos["OrganismTypes"] = match.group(2).strip()
     else:
         print("Warning: Response string does not match expected format.")
-    
     return codigos
 
 def get_collider_templates() -> dict:
-    """
-    Devuelve las plantillas de código C# para los colliders de cada morfología.
-    Ahora utilizan placeholders (ej: __LENGTH__) para ser reemplazados dinámicamente.
-    """
     return {
         "Bacilo": textwrap.dedent("""
             colliderAsset = Unity.Physics.CapsuleCollider.Create(new CapsuleGeometry
@@ -527,17 +478,14 @@ def get_collider_templates() -> dict:
 def parse_organism_data(input_str: str) -> list:
     if not input_str.startswith('[') or not input_str.endswith(']'):
         raise ValueError("Organism data must be enclosed in '[]'")
-    
     content = input_str.strip('[]')
     organism_entries = re.split(r';\s*(?=[^)]*(?:\(|$))', content)
-    
     parsed_data = []
     for entry in filter(None, (e.strip() for e in organism_entries)):
         match = re.match(r'([^->]+)\s*->\s*([^()]+)\s*\((.*)\)', entry)
         if not match:
             print(f"Warning: Organism entry '{entry}' has incorrect format and will be ignored.")
             continue
-        
         name, morphology, params_str = (m.strip() for m in match.groups())
         params = {
             key.strip(): value.strip()
@@ -549,101 +497,43 @@ def parse_organism_data(input_str: str) -> list:
     return parsed_data
 
 def generate_csharp_switch_cases(organism_data: list, templates: dict) -> str:
-    """
-    Genera los bloques 'case' del switch. Cada organismo tiene su propio 'case'
-    para permitir parámetros de collider únicos.
-    """
     final_case_blocks = []
-    
-    # Iteramos sobre cada organismo individualmente en lugar de agrupar.
     for organism in organism_data:
-        name = organism['name']
-        morphology = organism['morphology']
-        params = organism['params']
-        
+        name, morphology, params = organism['name'], organism['morphology'], organism['params']
         code_template = templates.get(morphology)
-        
         if not code_template:
-            # Manejar morfologías desconocidas si es necesario.
-            case_label = f'            case "{name}":'
             body = f"// Morfología '{morphology}' no implementada."
-            full_block = f"{case_label}\n                {body}\n                break;"
+            full_block = f'            case "{name}":\n                {body}\n                break;'
             final_case_blocks.append(full_block)
             continue
-
-        # Realizar el reemplazo de placeholders basado en la morfología.
         body = ""
         try:
             if morphology == "Bacilo":
-                # Extrae los valores de Length y Radius de los parámetros.
-                length_val = params['Length']
-                radius_val = params['Radius']
-                body = code_template.replace('__LENGTH__', length_val).replace('__RADIUS__', radius_val)
-            
+                body = code_template.replace('__LENGTH__', params['Length']).replace('__RADIUS__', params['Radius'])
             elif morphology == "Helicoide":
-                # Extrae el valor de MaxAxialLength.
-                max_length_val = params['MaxAxialLength']
-                body = code_template.replace('__MAX_AXIAL_LENGTH__', max_length_val)
-            
+                body = code_template.replace('__MAX_AXIAL_LENGTH__', params['MaxAxialLength'])
             else:
-                # Si la morfología tiene una plantilla pero no una lógica de reemplazo.
                 body = code_template
-
         except KeyError as e:
-            # Error si un parámetro requerido no se encuentra en la entrada.
-            print(f"Warning: Parameter {e} not found for organism '{name}'. Skipping collider generation for this case.")
             body = f"// Error: Parámetro {e} faltante para {name}."
-
-        # Construir el bloque 'case' completo.
-        case_label = f'            case "{name}":'
-        indented_body = textwrap.indent(body, ' ' * 16) # 16 espacios para indentar dentro del case
-        
-        full_block = f"{case_label}\n{indented_body}\n                break;"
+        indented_body = textwrap.indent(body, ' ' * 16)
+        full_block = f'            case "{name}":\n{indented_body}\n                break;'
         final_case_blocks.append(full_block)
-            
     return "\n\n".join(final_case_blocks)
 
 def generate_csharp_if_else_block(organism_data: list) -> str:
-    """
-    Genera el bloque if/else para añadir componentes.
-    Excluye los parámetros geométricos específicos de cada morfología,
-    pero mantiene los parámetros necesarios para la simulación (como MaxAxialLength).
-    """
-    # Mapea cada morfología a los parámetros que deben ser excluidos de su componente.
-    # Usamos un diccionario para manejar la lógica condicional.
     EXCLUDED_PARAMS_BY_MORPHOLOGY = {
-        "Bacilo": {"Radius", "Length"},
-        "Cocco": {"Diameter"},
-        # Para "Helicoide", no excluimos nada de esta lista, ya que
-        # MaxAxialLength es necesario para la simulación de crecimiento.
-        # No es necesario añadir "Helicoide": set() pero lo hace más explícito.
-        "Helicoide": set()
+        "Bacilo": {"Radius", "Length"}, "Cocco": {"Diameter"}, "Helicoide": set()
     }
-    
     blocks = []
     param_indent = ' ' * 16
     for i, organism in enumerate(organism_data):
-        name = organism['name']
-        morphology = organism['morphology']
-        
-        # Obtiene el conjunto de parámetros a excluir para la morfología actual.
-        # Si la morfología no está en el mapa, por defecto no se excluye nada.
+        name, morphology = organism['name'], organism['morphology']
         params_to_exclude = EXCLUDED_PARAMS_BY_MORPHOLOGY.get(morphology, set())
-        
-        # Filtra los parámetros, excluyendo los que corresponden a esta morfología.
-        param_lines = [
-            f"{param_indent}{key} = {value},"
-            for key, value in organism['params'].items()
-            if key not in params_to_exclude
-        ]
-        
-        # Elimina la coma del último elemento.
-        if param_lines: 
-            param_lines[-1] = param_lines[-1].rstrip(',')
-        
+        param_lines = [f"{param_indent}{key} = {value}," for key, value in organism['params'].items() if key not in params_to_exclude]
+        if param_lines: param_lines[-1] = param_lines[-1].rstrip(',')
         params_code = "\n".join(param_lines)
         keyword = "if" if i == 0 else "else if"
-        
         block = textwrap.dedent(f"""\
             {keyword} (prefabName == "{name}")
             {{
@@ -653,133 +543,102 @@ def generate_csharp_if_else_block(organism_data: list) -> str:
                 }});
             }}""")
         blocks.append(block.strip())
-        
     return "\n        ".join(blocks)
 
 def import_codes(codes: Dict[str, str], simulation_name: str) -> bool:
-    base_dir = os.getcwd()
-    simulation_folder = os.path.join(base_dir, "Simulations", simulation_name)
-    template_folder = os.path.join(base_dir, "Template")
-
-    if not os.path.exists(template_folder) or not os.path.isdir(template_folder):
+    simulation_folder = SIMULATIONS_DIR / simulation_name
+    template_folder = APP_BASE_DIR / "Template"
+    if not template_folder.is_dir():
         print(f"Error: Template folder not found at '{template_folder}'")
         return False
-        
-    if not os.path.exists(simulation_folder):
+    if not simulation_folder.exists():
         try:
             shutil.copytree(template_folder, simulation_folder)
-            print(f"Created new simulation folder '{simulation_name}' from template.")
         except Exception as e:
             print(f"Error creating simulation folder from template: {e}")
             return False
-
-    assets_editor_folder = os.path.join(simulation_folder, "Assets", "Editor")
-    assets_scripts_folder = os.path.join(simulation_folder, "Assets", "Scripts")
-    assets_scripts_components = os.path.join(assets_scripts_folder, "Components")
-    assets_scripts_systems = os.path.join(assets_scripts_folder, "Systems")
-    assets_scripts_general = os.path.join(assets_scripts_folder, "General")
-
+    assets_editor_folder = simulation_folder / "Assets" / "Editor"
+    assets_scripts_folder = simulation_folder / "Assets" / "Scripts"
+    assets_scripts_components = assets_scripts_folder / "Components"
+    assets_scripts_systems = assets_scripts_folder / "Systems"
+    assets_scripts_general = assets_scripts_folder / "General"
     for d in [assets_editor_folder, assets_scripts_components, assets_scripts_systems, assets_scripts_general]:
-        os.makedirs(d, exist_ok=True)
-
+        d.mkdir(parents=True, exist_ok=True)
     files_processed = []
-
-    # --- 1. Procesar PrefabMaterialCreator.cs ---
     pmc_content = codes.get("PrefabMaterialCreator.cs")
     if pmc_content:
-        dest_path = os.path.join(assets_editor_folder, "PrefabMaterialCreator.cs")
+        dest_path = assets_editor_folder / "PrefabMaterialCreator.cs"
         try:
             with open(dest_path, "r+", encoding="utf-8") as f:
                 template_text = f.read()
                 new_content = _insert_code_between_markers(template_text, pmc_content, "//CODE START", "//CODE END")
                 if new_content:
-                    f.seek(0)
-                    f.write(new_content)
-                    f.truncate()
+                    f.seek(0); f.write(new_content); f.truncate()
                     files_processed.append(dest_path)
-                    print(f"Successfully updated '{os.path.basename(dest_path)}'.")
         except Exception as e:
             print(f"Error processing PrefabMaterialCreator.cs: {e}")
-            
-    # --- 2. Procesar OrganismTypes ---
     organism_types_content = codes.get("OrganismTypes")
     if organism_types_content:
         try:
             organisms = parse_organism_data(organism_types_content)
-            
-            # --- 2a. Actualizar CreatePrefabsOnClick.cs ---
-            cpoc_path = os.path.join(assets_scripts_general, "CreatePrefabsOnClick.cs")
-            if os.path.exists(cpoc_path) and organisms:
+            cpoc_path = assets_scripts_general / "CreatePrefabsOnClick.cs"
+            if cpoc_path.exists() and organisms:
                 switch_code = generate_csharp_switch_cases(organisms, get_collider_templates())
                 if_else_code = generate_csharp_if_else_block(organisms)
-
                 with open(cpoc_path, "r+", encoding="utf-8") as f:
                     content = f.read()
                     new_content = _insert_code_between_markers(content, if_else_code, "//if_else_block START", "//if_else_block END")
                     if new_content:
                         new_content = _insert_code_between_markers(new_content, switch_code, "//case statements START", "//case statements END")
-                    
                     if new_content:
-                        f.seek(0)
-                        f.write(new_content)
-                        f.truncate()
+                        f.seek(0); f.write(new_content); f.truncate()
                         files_processed.append(cpoc_path)
-                        print(f"Successfully updated '{os.path.basename(cpoc_path)}'.")
-
-            # --- 2b. Generar archivos de Componente y Sistema ---
             for org in organisms:
                 name, morph, params = org['name'], org['morphology'], org['params']
                 for file_type in ["Component", "System"]:
                     template_file = f"{morph}{file_type}.cs"
-                    source_path = os.path.join(template_folder, "Assets", "Scripts", f"{file_type}s", template_file)
-                    
-                    if os.path.exists(source_path):
+                    source_path = template_folder / "Assets" / "Scripts" / f"{file_type}s" / template_file
+                    if source_path.exists():
                         dest_file = f"{name}{file_type}.cs"
-                        dest_path = os.path.join(assets_scripts_folder, f"{file_type}s", dest_file)
-                        with open(source_path, "r", encoding='utf-8') as f_tpl:
-                            tpl_text = f_tpl.read()
-                            # Siempre reemplazar el nombre de la morfología por el del organismo
-                            tpl_text = tpl_text.replace(morph, name)
-                            
-                            # Si es un Bacilo y estamos creando el archivo System, reemplazar el placeholder del largo.
-                            if morph == "Bacilo" and file_type == "System":
-                                try:
-                                    length_val = params['Length']
-                                    tpl_text = tpl_text.replace('__LENGTH__', length_val)
-                                except KeyError:
-                                    print(f"Warning: 'Length' parameter not found for Bacilo '{name}'. Placeholder __LENGTH__ will not be replaced in {dest_file}.")
-
-                        with open(dest_path, "w", encoding='utf-8') as f_dst:
-                            f_dst.write(tpl_text)
+                        dest_path = assets_scripts_folder / f"{file_type}s" / dest_file
+                        tpl_text = source_path.read_text(encoding='utf-8').replace(morph, name)
+                        if morph == "Bacilo" and file_type == "System":
+                            try:
+                                tpl_text = tpl_text.replace('__LENGTH__', params['Length'])
+                            except KeyError:
+                                print(f"Warning: 'Length' param not found for Bacilo '{name}'.")
+                        dest_path.write_text(tpl_text, encoding='utf-8')
                         files_processed.append(dest_path)
-                        print(f"Created file: '{dest_file}'.")
         except Exception as e:
             print(f"Error processing OrganismTypes: {e}")
-
-    # --- 3. Limpiar archivos de plantilla no utilizados ---
-    processed_basenames = {os.path.basename(fp) for fp in files_processed}
+    processed_basenames = {fp.name for fp in files_processed}
     for template_base_name in ["Bacilo", "Cocco", "Helicoide"]:
         for file_type in ["Component", "System"]:
             filename_to_check = f"{template_base_name}{file_type}.cs"
             if filename_to_check not in processed_basenames:
-                path_to_remove = os.path.join(simulation_folder, "Assets", "Scripts", f"{file_type}s", filename_to_check)
-                if os.path.exists(path_to_remove):
+                path_to_remove = simulation_folder / "Assets" / "Scripts" / f"{file_type}s" / filename_to_check
+                if path_to_remove.exists():
                     try:
-                        os.remove(path_to_remove)
-                        print(f"Cleaned up unused template file: '{filename_to_check}'.")
+                        path_to_remove.unlink()
                     except OSError as e:
-                        print(f"Error cleaning up template file '{filename_to_check}': {e}")
-                        
+                        print(f"Error cleaning template '{filename_to_check}': {e}")
     return bool(files_processed)
+
 DELIMITER = "%|%"
+RESPONSES_CSV = None
 try:
-    APP_DATA_DIR = Path.home() / "Documents" / "UnitySimulationManagerData"
-    APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    RESPONSES_DIR = APP_DATA_DIR / "Responses"
-    RESPONSES_CSV = RESPONSES_DIR / "Responses.csv"
-except Exception as e:
-    messagebox.showerror("Fatal Error", "Cannot establish a data storage location (Documents or executable path). Caching and history will be disabled.")
-    RESPONSES_CSV = None
+    APP_DATA_DIR_DOCS = Path.home() / "Documents" / "UnitySimulationManagerData"
+    APP_DATA_DIR_DOCS.mkdir(parents=True, exist_ok=True)
+    RESPONSES_DIR_DOCS = APP_DATA_DIR_DOCS / "Responses"
+    RESPONSES_DIR_DOCS.mkdir(parents=True, exist_ok=True)
+    RESPONSES_CSV = RESPONSES_DIR_DOCS / "Responses.csv"
+except Exception:
+    try:
+        RESPONSES_DIR = APP_BASE_DIR / "UserData" / "Responses"
+        RESPONSES_DIR.mkdir(parents=True, exist_ok=True)
+        RESPONSES_CSV = RESPONSES_DIR / "Responses.csv"
+    except Exception:
+        RESPONSES_CSV = None
 
 def check_last_char_is_newline(filepath: Union[str, Path]) -> bool:
     if not RESPONSES_CSV: return True
@@ -791,7 +650,7 @@ def check_last_char_is_newline(filepath: Union[str, Path]) -> bool:
             f.seek(-1, os.SEEK_END)
             last_byte = f.read(1)
             return last_byte == b'\n'
-    except Exception as e:
+    except Exception:
         return False
 
 def get_next_id(csv_path: Union[str, Path]) -> int:
@@ -799,7 +658,7 @@ def get_next_id(csv_path: Union[str, Path]) -> int:
     csv_path = Path(csv_path)
     try:
         csv_path.parent.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
+    except OSError:
         raise
     if not csv_path.exists():
         return 1
@@ -822,7 +681,7 @@ def get_next_id(csv_path: Union[str, Path]) -> int:
         return 1
     except FileNotFoundError:
         return 1
-    except Exception as e:
+    except Exception:
         return 1
 
 def write_response_to_csv(prompt: str, response: str, input_tokens: int, output_tokens: int) -> None:
@@ -846,8 +705,8 @@ def write_response_to_csv(prompt: str, response: str, input_tokens: int, output_
             f.write(line)
     except IOError as e:
         messagebox.showerror("Cache Write Error", f"Could not write to the response cache file:\n{RESPONSES_CSV}\n\nError: {e}\n\nCaching may be disabled.")
-    except Exception as e:
-        traceback.print_exc()
+    except Exception:
+        pass
 
 def get_cached_response(prompt: str) -> Union[str, None]:
     if not RESPONSES_CSV or not RESPONSES_CSV.exists():
@@ -870,27 +729,22 @@ def get_cached_response(prompt: str) -> Union[str, None]:
                 pass
     except FileNotFoundError:
         return None
-    except Exception as e:
+    except Exception:
         return None
     return None
 
 def clear_api_cache():
-    """Asks for confirmation and deletes the Responses.csv cache file."""
     if 'RESPONSES_CSV' not in globals() or RESPONSES_CSV is None:
         messagebox.showerror("Configuration Error", "Cache file path is not defined. Cannot clear.")
         return
-
-    # User confirmation dialog in English
     confirm = messagebox.askyesno(
         "Confirm Cache Deletion",
         f"Are you sure you want to permanently delete the API response cache file?\n\n({RESPONSES_CSV})\n",
         icon='warning'
     )
-
     if not confirm:
         update_status("Cache deletion cancelled by user.")
         return
-
     try:
         if RESPONSES_CSV.is_file():
             RESPONSES_CSV.unlink()
@@ -902,22 +756,23 @@ def clear_api_cache():
     except PermissionError:
         messagebox.showerror(
             "Permission Error",
-            f"Could not delete the file. Please ensure it is not open in another program (e.g., Excel) and that you have write permissions.\n\nPath: {RESPONSES_CSV}"
+            f"Could not delete the file. Please ensure it is not open in another program and that you have write permissions.\n\nPath: {RESPONSES_CSV}"
         )
         update_status("Permission error while clearing cache.")
     except Exception as e:
         messagebox.showerror("Unexpected Error", f"An unexpected error occurred while trying to delete the cache file:\n\n{e}")
         update_status(f"Unexpected error while clearing cache: {e}")
 
-
 def api_manager(sim_name: str, sim_desc: str, use_cache: bool = True) -> Tuple[bool, Union[str, None]]:
     if not API_BASE_URL:
-        return False, "Configuration Error: The API base URL (API_BASE_URL) is not defined."
+        return False, "Config Error: API_BASE_URL missing."
+    if not apis_key_ok or not apis_models_ok:
+        return False, "API/Model Configuration Error: API key or required models failed verification. Please check Settings and Verify Config."
     fmt_q, tk_is, tk_os, err_s = call_secondary_model_via_api(sim_desc)
     if err_s:
-        return False, f"API Call Error (Validation Model): {err_s}"
+        return False, f"Error in API call (Secondary Model): {err_s}"
     if not fmt_q:
-        return False, "Validation Model Error: The API returned an empty response."
+        return False, "Error from Secondary Model: API returned an empty response."
     fmt_q_s = fmt_q.strip()
     if fmt_q_s == "ERROR DE CONTENIDO":
         return False, "Validation Failed: The description contains content that is not suitable for a simulation of organisms with morphology (Bacilo, Cocco, Helicoide)."
@@ -926,7 +781,7 @@ def api_manager(sim_name: str, sim_desc: str, use_cache: bool = True) -> Tuple[b
     if fmt_q_s == "ERROR MORFOLOGIA NO ACEPTADA":
         return False, "Validation Failed: The organism's morphology is not accepted or is not one of the allowed types (Bacilo, Cocco, Helicoide)."
     if fmt_q_s.upper().startswith("ERROR"):
-        return False, f"Validation Model Error: {fmt_q_s}"
+        return False, f"Error from Secondary Model: {fmt_q_s}"
     final_response: Optional[str] = None
     cache_hit = False
     total_tk_in = tk_is
@@ -939,26 +794,26 @@ def api_manager(sim_name: str, sim_desc: str, use_cache: bool = True) -> Tuple[b
     if not final_response:
         prim_r, tk_ip, tk_op, err_p = call_primary_model_via_api(fmt_q)
         if err_p:
-            return False, f"Error en la llamada API (Modelo Generación): {err_p}"
+            return False, f"Error in API call (Primary Model): {err_p}"
         if not prim_r:
-            return False, "Error del Modelo Generación: La API devolvió una respuesta vacía."
+            return False, "Error from Primary Model: API returned an empty response."
         if "ERROR FORMATO" in prim_r.upper():
-            return False, f"Error de Formato de Pregunta: El modelo de generación rechazó la pregunta formateada:\n'{fmt_q}'"
+            return False, f"Prompt Format Error: Primary model rejected the formatted prompt:\n'{fmt_q}'"
         final_response = prim_r
         total_tk_in += tk_ip
         total_tk_out += tk_op
         if use_cache and not cache_hit:
             write_response_to_csv(fmt_q, final_response, total_tk_in, total_tk_out)
     if not final_response:
-        return False, "Error Crítico: No se obtuvo una respuesta final válida (ni de caché ni generada)."
+        return False, "Critical Error: No valid final response obtained (neither from cache nor generated)."
     codes = separar_codigos_por_archivo(final_response)
     if not codes:
-        return False, f"Error de Extracción: No se encontraron bloques de código C# válidos en la respuesta.\nInicio de respuesta recibida:\n{final_response[:800]}..."
+        return False, f"Extraction Error: No valid C# code blocks found in the response.\nStart of received response:\n{final_response[:800]}..."
     ok_import = import_codes(codes, sim_name)
     if ok_import:
         return True, None
     else:
-        return False, f"Error de Importación: Falló al guardar los scripts para la simulación '{sim_name}'. Por favor, revisa los logs para más detalles."
+        return False, f"Import Error: Failed to save scripts for simulation '{sim_name}'. Please check logs for details."
 
 def center_window(window, width, height):
     window.update_idletasks()
@@ -970,14 +825,11 @@ def center_window(window, width, height):
 
 def apply_icon(window):
     try:
-        icon_path = None
-        if ICON_PATH_WIN and os.path.exists(ICON_PATH_WIN):
-            icon_path = ICON_PATH_WIN
-            window.iconbitmap(icon_path)
-    except tk.TclError as e:
-        if icon_path:
-            pass
-    except Exception as e:
+        if ICON_PATH_WIN and ICON_PATH_WIN.exists():
+            window.iconbitmap(str(ICON_PATH_WIN))
+    except tk.TclError:
+        pass
+    except Exception:
         pass
 
 class CustomInputDialog(ctk.CTkToplevel):
@@ -1078,10 +930,15 @@ def on_closing():
         if callable(globals().get('update_status')): update_status("Closing application...")
         close_unity_thread = threading.Thread(target=ensure_unity_closed, daemon=True)
         close_unity_thread.start()
+        close_unity_thread.join(timeout=2.0)
         if 'main_window' in globals() and main_window:
-            main_window.after(200, main_window.destroy)
-        else:
-            sys.exit()
+            try:
+                main_window.destroy()
+            except tk.TclError:
+                pass
+            except Exception:
+                pass
+        sys.exit(0)
 
 def disable_all_interactions():
     global is_build_running
@@ -1105,7 +962,7 @@ def disable_all_interactions():
             sim_tree.unbind("<Leave>")
             sim_tree.configure(cursor="watch")
         if callable(globals().get('update_status')): update_status("Operation in progress... Please wait.")
-    except (NameError, tk.TclError) as e:
+    except (NameError, tk.TclError):
         pass
 
 def enable_all_interactions():
@@ -1128,16 +985,14 @@ def enable_all_interactions():
                 main_window.after(10, update_button_states)
             else:
                 update_button_states()
-    except (NameError, tk.TclError) as e:
+    except (NameError, tk.TclError):
         pass
 
 def update_status(message):
     try:
         if 'main_window' in globals() and main_window and main_window.winfo_exists() and 'status_label' in globals():
             main_window.after(0, lambda msg=str(message): status_label.configure(text=msg))
-        else:
-            pass
-    except Exception as e:
+    except Exception:
         pass
 
 def handle_unity_execution_error(error, operation_name="operation"):
@@ -1169,9 +1024,7 @@ def handle_unity_execution_error(error, operation_name="operation"):
     try:
         if 'main_window' in globals() and main_window and main_window.winfo_exists():
             main_window.after(0, lambda title=f"Unity {operation_name.capitalize()} Error", msg=error_message: messagebox.showerror(title, msg))
-        else:
-            pass
-    except Exception as mb_error:
+    except Exception:
         pass
 
 def ensure_unity_closed():
@@ -1189,30 +1042,21 @@ def ensure_unity_closed():
                         unity_processes.append(proc)
             except (psutil.NoSuchProcess, psutil.AccessDenied, FileNotFoundError):
                 continue
-            except Exception as inner_ex:
+            except Exception:
                 continue
-    except Exception as ex:
+    except Exception:
         return
     if unity_processes:
-        time_start = time.time()
         for proc in unity_processes:
             try:
                 proc.terminate()
-            except psutil.NoSuchProcess:
-                pass
-            except psutil.Error as term_err:
+            except psutil.Error:
                 pass
         gone, alive = psutil.wait_procs(unity_processes, timeout=5)
-        if alive:
-            for proc in alive:
-                try:
-                    proc.kill()
-                except psutil.NoSuchProcess:
-                    pass
-                except psutil.Error as kill_err:
-                    pass
-            _, alive_after_kill = psutil.wait_procs(alive, timeout=3)
-            if alive_after_kill:
+        for proc in alive:
+            try:
+                proc.kill()
+            except psutil.Error:
                 pass
 
 def open_graphs_folder(simulation_name):
@@ -1228,11 +1072,9 @@ def open_graphs_folder(simulation_name):
         graphs_folder_path.mkdir(parents=True, exist_ok=True)
         os.startfile(str(graphs_folder_path))
     except FileNotFoundError:
-        cmd = 'open' if platform.system() == 'Darwin' else 'xdg-open'
-        messagebox.showerror("System Error", f"Could not find the system command ('{cmd}') to open the folder on this OS ({platform.system()}).")
+        messagebox.showerror("System Error", "Could not find the system command to open the folder on Windows.")
     except Exception as e:
         messagebox.showerror("Error", f"Could not open the graphics folder:\n{graphs_folder_path}\n\nError: {e}")
-        traceback.print_exc()
 
 def get_folder_size(path: Union[str, Path]) -> int:
     total = 0
@@ -1247,11 +1089,7 @@ def get_folder_size(path: Union[str, Path]) -> int:
                     total += get_folder_size(entry)
             except (FileNotFoundError, PermissionError):
                 continue
-            except Exception as scan_err:
-                continue
     except (FileNotFoundError, PermissionError):
-        pass
-    except Exception as e:
         pass
     return total
 
@@ -1268,7 +1106,7 @@ def copy_directory(src: Union[str, Path], dst: Union[str, Path]) -> bool:
             try:
                 if dst_path.is_dir(): shutil.rmtree(dst_path, ignore_errors=False)
                 else: dst_path.unlink()
-            except Exception as rm_e:
+            except Exception:
                 if dst_path.is_dir(): shutil.rmtree(dst_path, ignore_errors=True)
                 elif dst_path.is_file(): dst_path.unlink(missing_ok=True)
             time.sleep(0.1)
@@ -1290,12 +1128,9 @@ def get_build_target_and_executable(project_path: Union[str, Path, None]) -> Tup
     build_target = "Win64"
     platform_folder = "Windows"
     executable_suffix = ".exe"
-    if build_target and platform_folder:
-        build_base_dir = project_path / "Build" / platform_folder
-        executable_path = build_base_dir / (SIMULATION_PROJECT_NAME + executable_suffix)
-        return build_target, str(executable_path)
-    else:
-        return None, None
+    build_base_dir = project_path / "Build" / platform_folder
+    executable_path = build_base_dir / (SIMULATION_PROJECT_NAME + executable_suffix)
+    return build_target, str(executable_path)
 
 def get_simulations() -> list[Dict]:
     simulations = []
@@ -1326,7 +1161,7 @@ def get_simulations() -> list[Dict]:
                         "last_opened": last_opened_str,
                         "creation_ts": created_timestamp,
                     })
-    except Exception as e:
+    except Exception:
         return []
     return simulations
 
@@ -1335,9 +1170,9 @@ def update_last_opened(sim_name: str):
     try:
         simulation_folder.mkdir(parents=True, exist_ok=True)
         last_opened_file = simulation_folder / "last_opened.txt"
-        with open(last_opened_file, "w", encoding="utf-8") as f:
+        with open(last_opened_file, "w") as f:
             f.write(str(time.time()))
-    except Exception as e:
+    except Exception:
         pass
 
 def read_last_loaded_simulation_name() -> Union[str, None]:
@@ -1349,7 +1184,7 @@ def read_last_loaded_simulation_name() -> Union[str, None]:
     elif isinstance(current_value, str) and current_value:
         try:
             file_path_obj = Path(current_value)
-        except Exception as e:
+        except Exception:
             return None
     elif current_value is None:
         pass
@@ -1360,7 +1195,7 @@ def read_last_loaded_simulation_name() -> Union[str, None]:
             with open(file_path_obj, "r", encoding="utf-8") as f:
                 content = f.read().strip()
                 return content if content else None
-        except Exception as e:
+        except Exception:
             return None
     else:
         return None
@@ -1405,7 +1240,7 @@ def load_simulation(sim_name: str) -> bool:
                     if target_folder.is_dir(): shutil.rmtree(target_folder, ignore_errors=True)
                     else: target_folder.unlink(missing_ok=True)
                     time.sleep(0.1)
-                except Exception as rm_e: pass
+                except Exception: pass
         for folder_name in folders_to_copy:
             src_folder = source_path / folder_name
             dst_folder = SIMULATION_PROJECT_PATH / folder_name
@@ -1465,7 +1300,7 @@ def delete_simulation(sim_name: str):
         state_file_path_obj = current_state_file_value
     elif isinstance(current_state_file_value, str) and current_state_file_value:
         try: state_file_path_obj = Path(current_state_file_value)
-        except Exception as e: errors_occurred = True
+        except Exception: errors_occurred = True
     elif current_state_file_value is None: pass
     else:
         errors_occurred = True
@@ -1477,7 +1312,7 @@ def delete_simulation(sim_name: str):
                     state_file_path_obj.unlink()
                     if last_simulation_loaded == sim_name:
                         last_simulation_loaded = None
-            except Exception as e:
+            except Exception:
                 errors_occurred = True
         else:
             if last_simulation_loaded == sim_name:
@@ -1499,12 +1334,11 @@ def delete_simulation(sim_name: str):
                     errors_occurred = True
                 except Exception as e:
                     messagebox.showerror("Unexpected Error", f"An unexpected error occurred deleting the local configuration folder:\n{local_sim_path}\n\n{e}")
-                    traceback.print_exc()
                     errors_occurred = True
             else:
                 try:
                     local_sim_path.unlink()
-                except Exception as e:
+                except Exception:
                     errors_occurred = True
     else:
         if 'main_window' in globals() and main_window and main_window.winfo_exists():
@@ -1525,15 +1359,11 @@ def delete_simulation(sim_name: str):
                 errors_occurred = True
             except Exception as e:
                 messagebox.showerror("Unexpected Error", f"An unexpected error occurred deleting the Unity data folder:\n{unity_data_path}\n\n{e}")
-                traceback.print_exc()
                 errors_occurred = True
         else:
             errors_occurred = True
-    else:
-        pass
     if 'all_simulations_data' in globals():
         all_simulations_data[:] = [s for s in all_simulations_data if isinstance(s, dict) and s.get('name') != sim_name]
-        
     final_message = f"Deletion of '{sim_name}' completed"
     if errors_occurred:
         final_message += " with errors."
@@ -1546,8 +1376,6 @@ def delete_simulation(sim_name: str):
             main_window.after(0, populate_simulations)
         else:
             populate_simulations()
-    else:
-        pass
 
 def format_time(seconds: Union[float, int, None]) -> str:
     if seconds is None or seconds < 0 or math.isinf(seconds) or math.isnan(seconds):
@@ -1566,42 +1394,17 @@ def format_time(seconds: Union[float, int, None]) -> str:
 
 def monitor_unity_progress(stop_event: threading.Event, operation_tag: str):
     global SIMULATION_PROJECT_PATH
-
-    project_path_valid = False
-    if SIMULATION_PROJECT_PATH:
-        try:
-            project_path_obj = Path(SIMULATION_PROJECT_PATH)
-            if project_path_obj.is_dir():
-                project_path_valid = True
-            else:
-                pass
-        except Exception as path_e:
-            update_status(f"[{operation_tag}] Warning: Error validating project path '{SIMULATION_PROJECT_PATH}'. {path_e}. Time monitoring will continue.")
-    else:
-        update_status(f"[{operation_tag}] Warning: Project path is not configured. Time monitoring will continue.")
-
-    UPDATE_INTERVAL = 1.0
-    last_time_update = 0
     start_time = time.time()
-
     update_status(f"[{operation_tag}] Starting...")
-
     while not stop_event.is_set():
-        current_time = time.time()
-
-        if current_time - last_time_update >= UPDATE_INTERVAL:
-            elapsed_time = current_time - start_time
-            formatted_elapsed_time = format_time(elapsed_time)
-            status_message = f"[{operation_tag}] In progress... Time elapsed: {formatted_elapsed_time}"
-            update_status(status_message.ljust(60))
-            last_time_update = current_time
-
-        time.sleep(0.3)
-
+        elapsed_time = time.time() - start_time
+        formatted_elapsed_time = format_time(elapsed_time)
+        status_message = f"[{operation_tag}] In progress... Time elapsed: {formatted_elapsed_time}"
+        update_status(status_message.ljust(60))
+        time.sleep(1.0)
     final_elapsed_time = time.time() - start_time
     formatted_final_time = format_time(final_elapsed_time)
     update_status(f"[{operation_tag}] Operation finished. Total time: {formatted_final_time}")
-
 
 def run_unity_batchmode(exec_method: str, op_name: str, log_file_name: str, timeout: int = 600, extra_args: list = None) -> tuple[bool, Union[str, None]]:
     if not all([unity_path_ok, unity_version_ok, unity_projects_path_ok, SIMULATION_PROJECT_PATH]):
@@ -1656,8 +1459,6 @@ def run_unity_batchmode(exec_method: str, op_name: str, log_file_name: str, time
                         found = True
                         executable_path = str(build_exe_path)
                         break
-                    else:
-                        pass
                 if found:
                     update_status(f"[{op_name.capitalize()}] Build executable verified.")
                 else:
@@ -1818,24 +1619,19 @@ def _perform_blink_animation():
     if 'settings_btn' in globals() and settings_btn.winfo_exists() and 'main_window' in globals() and main_window.winfo_exists():
         mode_idx = get_color_mode_index()
         current_fg_color_tuple = settings_btn.cget("fg_color")
-        
         normal_color_tuple = BTN_SETTINGS_FG_COLOR
         hover_color_tuple = _BLINK_COLOR
-
         actual_current_fg = settings_btn._apply_appearance_mode(current_fg_color_tuple)
         actual_normal_color = settings_btn._apply_appearance_mode(normal_color_tuple[mode_idx])
-        actual_hover_color = settings_btn._apply_appearance_mode(hover_color_tuple[mode_idx])
-
         if actual_current_fg == actual_normal_color:
             settings_btn.configure(fg_color=hover_color_tuple[mode_idx])
         else:
             settings_btn.configure(fg_color=normal_color_tuple[mode_idx])
-        
         settings_button_blink_job = main_window.after(500, _perform_blink_animation)
     else:
         if settings_button_blink_job:
             if 'main_window' in globals() and main_window.winfo_exists():
-                 main_window.after_cancel(settings_button_blink_job)
+                main_window.after_cancel(settings_button_blink_job)
             settings_button_blink_job = None
 
 def start_settings_button_blink():
@@ -1843,83 +1639,72 @@ def start_settings_button_blink():
     if settings_button_blink_job:
         return
     if 'settings_btn' in globals() and settings_btn.winfo_exists() and 'main_window' in globals() and main_window.winfo_exists():
-        mode_idx = get_color_mode_index()
-        settings_btn.configure(fg_color=BTN_SETTINGS_FG_COLOR[mode_idx]) 
         _perform_blink_animation()
 
 def stop_settings_button_blink():
     global settings_button_blink_job
     if settings_button_blink_job:
         if 'main_window' in globals() and main_window.winfo_exists():
-             main_window.after_cancel(settings_button_blink_job)
+            main_window.after_cancel(settings_button_blink_job)
         settings_button_blink_job = None
     if 'settings_btn' in globals() and settings_btn.winfo_exists():
         mode_idx = get_color_mode_index()
         settings_btn.configure(fg_color=BTN_SETTINGS_FG_COLOR[mode_idx])
 
-
 def perform_verification(show_results_box=False, on_startup=False):
-    global unity_path_ok, unity_version_ok, unity_projects_path_ok, apis_key_ok, apis_models_ok, initial_verification_complete, last_simulation_loaded
+    global unity_path_ok, unity_version_ok, unity_projects_path_ok, apis_key_ok, apis_models_ok, initial_verification_complete
     global UNITY_EXECUTABLE, UNITY_PROJECTS_PATH, API_BASE_URL, API_KEY
-
-    if not on_startup: update_status("Verifying configuration...")
-    load_dotenv('.env', override=True)
-    UNITY_EXECUTABLE = os.getenv("UNITY_EXECUTABLE"); UNITY_PROJECTS_PATH = os.getenv("UNITY_PROJECTS_PATH")
-    API_BASE_URL = os.getenv("API_BASE_URL"); API_KEY = os.getenv("API_KEY")
-
-    unity_path_ok=unity_version_ok=unity_projects_path_ok=apis_key_ok=apis_models_ok=False
-    detailed_results_log = []
+    global SIMULATION_PROJECT_PATH, ASSETS_FOLDER, STREAMING_ASSETS_FOLDER, SIMULATION_LOADED_FILE, last_simulation_loaded, all_simulations_data
+    if not on_startup:
+        update_status("Verifying configuration...")
+    load_dotenv(DOTENV_PATH, override=True)
+    UNITY_EXECUTABLE = os.environ.get("UNITY_EXECUTABLE")
+    UNITY_PROJECTS_PATH = os.environ.get("UNITY_PROJECTS_PATH")
+    API_BASE_URL = os.getenv("API_BASE_URL")
+    API_KEY = os.getenv("API_KEY")
+    unity_path_ok = unity_version_ok = unity_projects_path_ok = apis_key_ok = apis_models_ok = False
+    results = []
     req_ver = UNITY_REQUIRED_VERSION_STRING
-    api_status_summary = "N/A - Configuration Missing"
-    api_check_error = None
-    client_auth_ok = False
-    server_openai_key_ok = False
-    server_primary_model_ok = False
-
-    detailed_results_log.append("--- Local Verification ---")
-    if not UNITY_EXECUTABLE: detailed_results_log.append("❌ Unity Executable: Path missing in .env file.")
-    elif not Path(UNITY_EXECUTABLE).exists(): detailed_results_log.append(f"❌ Unity Executable: Path does not exist:\n   '{UNITY_EXECUTABLE}'")
+    if not UNITY_EXECUTABLE:
+        results.append("❌ Unity Executable: Path missing in .env file.")
+    elif not Path(UNITY_EXECUTABLE).is_file():
+        results.append(f"❌ Unity Executable: Path is not a valid file:\n   '{UNITY_EXECUTABLE}'")
     else:
-        unity_path_ok = True; detailed_results_log.append(f"✅ Unity Executable: Path exists: '{UNITY_EXECUTABLE}'")
+        unity_path_ok = True
+        results.append(f"✅ Unity Executable: Path OK ('{Path(UNITY_EXECUTABLE).name}').")
         try:
-            unity_exe_path = Path(UNITY_EXECUTABLE).resolve()
-            if not unity_exe_path.is_file():
-                detailed_results_log.append(f"❌ Unity Exe: Path is not a file on Windows.")
-                unity_path_ok = False
+            p = Path(UNITY_EXECUTABLE).resolve()
+            if p.parent.name == "Editor" and p.parent.parent.name == req_ver:
+                unity_version_ok = True
+                results.append(f"✅ Unity Version: Path matches required version '{req_ver}'.")
             else:
-                expected_suffix_lower = str(Path(req_ver) / "Editor" / "Unity.exe").lower()
-                if str(unity_exe_path).lower().endswith(expected_suffix_lower):
-                    unity_version_ok = True; detailed_results_log.append(f"✅ Unity Version: Path structure matches required '{req_ver}'.")
-                elif unity_exe_path.parent.parent.name == req_ver:
-                    unity_version_ok = True; detailed_results_log.append(f"✅ Unity Version: Parent folder matches required '{req_ver}'.")
-                else:
-                    detailed_results_log.append(f"❌ Unity Version: Path structure/parent folder mismatch (Req: '{req_ver}').")
-        except Exception as ver_err: detailed_results_log.append(f"⚠️ Unity Version: Unexpected error during check: {ver_err}"); unity_version_ok = False
-
-    if not UNITY_PROJECTS_PATH: detailed_results_log.append("❌ Projects Path: Missing in .env file.")
-    elif not Path(UNITY_PROJECTS_PATH).is_dir(): detailed_results_log.append(f"❌ Projects Path: Invalid or not directory:\n   '{UNITY_PROJECTS_PATH}'")
+                results.append(f"❌ Unity Version: Path does not match required version '{req_ver}'.")
+        except Exception as path_err:
+            results.append(f"⚠️ Unity Version: Error during path check: {path_err}")
+    if not UNITY_PROJECTS_PATH:
+        results.append("❌ Projects Path: Missing in .env file.")
+    elif not Path(UNITY_PROJECTS_PATH).is_dir():
+        results.append(f"❌ Projects Path: Path invalid or not a directory:\n   '{UNITY_PROJECTS_PATH}'")
     else:
-        unity_projects_path_ok = True; detailed_results_log.append(f"✅ Projects Path: Directory OK: '{UNITY_PROJECTS_PATH}'")
+        unity_projects_path_ok = True
+        results.append(f"✅ Projects Path: Directory OK.")
         try:
-            base_proj = Path(UNITY_PROJECTS_PATH)
-            SIMULATION_PROJECT_PATH = base_proj / SIMULATION_PROJECT_NAME
+            base_proj_path = Path(UNITY_PROJECTS_PATH)
+            SIMULATION_PROJECT_PATH = base_proj_path / SIMULATION_PROJECT_NAME
             ASSETS_FOLDER = SIMULATION_PROJECT_PATH / "Assets"
             STREAMING_ASSETS_FOLDER = ASSETS_FOLDER / "StreamingAssets"
             SIMULATION_LOADED_FILE = STREAMING_ASSETS_FOLDER / "simulation_loaded.txt"
             last_simulation_loaded = read_last_loaded_simulation_name()
-        except Exception as path_e: detailed_results_log.append(f"⚠️ Project Paths: Error constructing paths: {path_e}"); unity_projects_path_ok = False
-    
-    should_blink_settings = not unity_path_ok or not unity_projects_path_ok
+        except Exception as path_e:
+            results.append(f"⚠️ Project Paths: Error constructing paths: {path_e}")
+            unity_projects_path_ok = False
+            
+    should_blink_settings = not all([unity_path_ok, unity_version_ok, unity_projects_path_ok, API_BASE_URL, API_KEY])
 
-    detailed_results_log.append("\n--- API Server Verification ---")
-    if not API_BASE_URL:
-        detailed_results_log.append("❌ API Server URL: Missing in .env file.")
-        api_status_summary = "API Unavailable: Server URL missing."
-    elif not API_KEY:
-        detailed_results_log.append("❌ Client API Key: Missing in .env file.")
-        api_status_summary = "API Unavailable: Client API Key missing."
+    if not API_BASE_URL: results.append("❌ API Server URL: Missing in .env file."); results.append("   ↳ Cannot verify server/OpenAI config.")
+    elif not API_KEY: results.append("❌ Client API Key: Missing in .env file."); results.append("   ↳ Cannot authenticate with API server.")
     else:
-        detailed_results_log.append(f"✅ API Server URL: {API_BASE_URL}")
+        results.append(f"ℹ️ API Server URL: {API_BASE_URL}")
         verify_url = f"{API_BASE_URL.rstrip('/')}/verify_config"
         headers = {'X-API-Key': API_KEY}
         try:
@@ -1928,73 +1713,40 @@ def perform_verification(show_results_box=False, on_startup=False):
             response = requests.get(verify_url, headers=headers, timeout=15)
             response.raise_for_status()
             server_data = response.json()
-            server_details = server_data.get('verification_details', {})
-            client_auth_status = server_details.get('api_server_key_status', "❔ Unknown Client Auth Status")
+            details = server_data.get('verification_details', {})
+            client_auth_status = details.get('api_server_key_status', "ERROR")
             client_auth_ok = "ok" in client_auth_status.lower() or "verified" in client_auth_status.lower() or "✅" in client_auth_status
-            openai_key_status = server_details.get('openai_api_key_status', '❔ Unknown Server OpenAI Key Status')
-            server_openai_key_ok = "ok" in openai_key_status.lower() or "verified" in openai_key_status.lower() or "✅" in openai_key_status
-            primary_model_status = server_details.get('primary_model_status', '❔ Unknown Server Primary Model Status')
-            server_primary_model_ok = "ok" in primary_model_status.lower() or "verified" in primary_model_status.lower() or "✅" in primary_model_status
-            secondary_model_status = server_details.get('secondary_model_status', '❔ Unknown Server Secondary Model Status')
+            server_openai_key_ok = server_data.get('openai_api_key_ok', False)
+            server_primary_model_ok = server_data.get('primary_model_ok', False)
             apis_key_ok = client_auth_ok and server_openai_key_ok
             apis_models_ok = apis_key_ok and server_primary_model_ok
-            detailed_results_log.append(f"↳ Client API Key Status (Server): {client_auth_status}")
-            detailed_results_log.append(f"↳ Server OpenAI Key Status: {openai_key_status}")
-            detailed_results_log.append(f"↳ Server Primary Model Status: {primary_model_status}")
-            detailed_results_log.append(f"↳ Server Secondary Model Status: {secondary_model_status}")
-            if apis_models_ok:
-                api_status_summary = "API OK (Ready for Creation)"
-            elif apis_key_ok:
-                api_status_summary = "API Limited: Primary Model Not Ready (Server Issue?)"
-            elif client_auth_ok:
-                api_status_summary = "API Limited: Server OpenAI Key Issue (Server Issue?)"
-            else:
-                api_status_summary = "API Unavailable: Client Authentication Failed"
-                if 'error' in server_data:
-                    api_check_error = f"Server Error: {server_data['error']}"
+            results.append(details.get('api_server_key_status', '❔ Client API Key Status (Server): Unknown'))
+            results.append(details.get('openai_api_key_status', '❔ OpenAI Key Status (Server): Unknown'))
+            results.append(details.get('primary_model_status', '❔ Primary Model Status (Server): Unknown'))
+            results.append(details.get('secondary_model_status', '❔ Secondary Model Status (Server): Unknown'))
+            should_blink_settings = should_blink_settings or not (apis_key_ok and apis_models_ok)
         except ImportError as imp_err:
-            detailed_results_log.append(f"❌ API Server Check Error: {imp_err}")
-            api_status_summary = "API Unavailable: Missing 'requests' library."
-            api_check_error = str(imp_err)
-            apis_key_ok = apis_models_ok = False
-        except requests.exceptions.ConnectionError:
-            detailed_results_log.append(f"❌ API Server Check Error: CONNECTION FAILED! ({API_BASE_URL})")
-            api_status_summary = "API Unavailable: Connection Failed."
-            api_check_error = f"Connection failed to {API_BASE_URL}"
-            apis_key_ok = apis_models_ok = False
-        except requests.exceptions.Timeout:
-            detailed_results_log.append(f"❌ API Server Check Error: TIMEOUT! ({API_BASE_URL})")
-            api_status_summary = "API Unavailable: Timeout."
-            api_check_error = f"Timeout connecting to {API_BASE_URL}"
-            apis_key_ok = apis_models_ok = False
+             results.append(f"❌ API Server Check: {imp_err}"); apis_key_ok = apis_models_ok = False; should_blink_settings = True
+        except requests.exceptions.ConnectionError: results.append(f"❌ API Server Check: CONNECTION FAILED! ({API_BASE_URL})"); apis_key_ok = apis_models_ok = False; should_blink_settings = True
+        except requests.exceptions.Timeout: results.append(f"❌ API Server Check: TIMEOUT! ({API_BASE_URL})"); apis_key_ok = apis_models_ok = False; should_blink_settings = True
         except requests.exceptions.RequestException as e:
-            status = e.response.status_code if e.response is not None else '??'
-            err_msg = f"Request failed ({status})."
-            detail = "N/A"
+            status = e.response.status_code if e.response is not None else '??'; err_txt = f"Request failed ({status})."; detail="N/A"
             if e.response is not None:
                 try: detail = e.response.json().get('error', e.response.text[:100]+'...')
-                except: detail = e.response.text[:100]+'...'
-                err_msg += f" Detail: {detail}"
-            detailed_results_log.append(f"❌ API Server Check Error: {err_msg}")
-            api_status_summary = f"API Unavailable: Server Request Failed ({status})."
-            api_check_error = err_msg
-            apis_key_ok = apis_models_ok = False
-        except Exception as e:
-            detailed_results_log.append(f"❌ API Server Check Error: Unexpected error: {type(e).__name__}")
-            api_status_summary = "API Unavailable: Unexpected Client Error."
-            api_check_error = f"Unexpected error during API check: {type(e).__name__}"
-            apis_key_ok = apis_models_ok = False
+                except: detail = e.response.text[:100]+'...'; err_txt += f" Detail: {detail}"
+                if status == 403: err_txt += "\n   ↳ Access DENIED. Is Client API_KEY correct?"
+            results.append(f"❌ API Server Check: {err_txt}"); apis_key_ok = apis_models_ok = False; should_blink_settings = True
+        except Exception as e: results.append(f"❌ API Server Check: Unexpected error: {type(e).__name__}"); apis_key_ok = apis_models_ok = False; should_blink_settings = True
 
     initial_verification_complete = True
-    unity_status_short = "Unity OK" if unity_path_ok and unity_version_ok and unity_projects_path_ok else "Unity ERR"
-    final_status_bar_text = f"Status: {unity_status_short} | {api_status_summary}"
+    unity_status = "Unity OK" if unity_path_ok and unity_version_ok and unity_projects_path_ok else "Unity ERR"
+    api_status = "API OK" if apis_key_ok and apis_models_ok else "API ERR"
+    final_status_string = f"Status: {unity_status} | {api_status}"
 
     def update_blink_state_on_main_thread():
         if 'settings_btn' in globals() and settings_btn.winfo_exists():
-            if should_blink_settings:
-                start_settings_button_blink()
-            else:
-                stop_settings_button_blink()
+            if should_blink_settings: start_settings_button_blink()
+            else: stop_settings_button_blink()
 
     if 'main_window' in globals() and main_window.winfo_exists():
         if threading.current_thread() is not threading.main_thread():
@@ -2004,140 +1756,105 @@ def perform_verification(show_results_box=False, on_startup=False):
 
     try:
         if 'main_window' in globals() and main_window and main_window.winfo_exists():
-            main_window.after(0, lambda: update_status(final_status_bar_text))
+            main_window.after(0, lambda: update_status(final_status_string))
             main_window.after(50, update_button_states)
-            if unity_projects_path_ok:
-                global all_simulations_data
-                all_simulations_data = get_simulations()
-                main_window.after(100, filter_simulations)
-            if show_results_box or (on_startup and not (unity_path_ok and unity_version_ok and unity_projects_path_ok and apis_key_ok and apis_models_ok)):
-                dialog_message = "--- Local Configuration ---\n"
-                if unity_path_ok: dialog_message += f"✅ Unity Executable: Path OK\n"
-                else: dialog_message += f"❌ Unity Executable: Path missing or invalid.\n"
-                if unity_path_ok and unity_version_ok: dialog_message += f"✅ Unity Version: Required '{req_ver}' detected.\n"
-                elif unity_path_ok: dialog_message += f"❌ Unity Version: Mismatch or detection failed (Req: '{req_ver}').\n"
-                else: dialog_message += f"   (Cannot verify Unity version - Exe path invalid)\n"
-                if unity_projects_path_ok: dialog_message += f"✅ Projects Path: Directory OK\n"
-                else: dialog_message += f"❌ Projects Path: Path missing or invalid.\n"
-                dialog_message += "\n--- API Server Status ---\n"
-                if API_BASE_URL: dialog_message += f"✅ API Server URL: {API_BASE_URL}\n"
-                else: dialog_message += f"❌ API Server URL: Missing in .env\n"
-                if API_BASE_URL and API_KEY:
-                    if client_auth_ok: dialog_message += f"✅ Client API Key: Authentication OK\n"
-                    else: dialog_message += f"❌ Client API Key: Authentication failed with server.\n"
-                    if client_auth_ok:
-                        dialog_message += f"↳ Server OpenAI Key Status: {server_details.get('openai_api_key_status', '❔ Unknown')}\n"
-                        dialog_message += f"↳ Server Primary Model Status: {server_details.get('primary_model_status', '❔ Unknown')}\n"
-                        dialog_message += f"↳ Server Secondary Model Status: {server_details.get('secondary_model_status', '❔ Unknown')}\n"
-                    else:
-                        dialog_message += f"   (Cannot check Server dependencies - Client Key failed)\n"
-                    if api_check_error:
-                        dialog_message += f"\nDetails: {api_check_error}\n"
-                elif API_BASE_URL and not API_KEY:
-                    dialog_message += f"❌ Client API Key: Missing in .env\n"
-                dialog_message += "\n--- Overall Status ---\n"
-                if unity_path_ok and unity_version_ok and unity_projects_path_ok and apis_key_ok and apis_models_ok:
-                    dialog_message += "✅ Application Ready: Unity and API OK."
-                elif unity_path_ok and unity_version_ok and unity_projects_path_ok:
-                    dialog_message += f"⚠️ Application Limited: Unity OK, but API Unavailable/Limited ({api_status_summary}). Creation disabled."
-                elif apis_key_ok and apis_models_ok:
-                    dialog_message += f"⚠️ Application Limited: API OK, but Unity configuration incomplete. Simulation execution/building disabled."
-                else:
-                    dialog_message += "❌ Application Not Ready: Please fix configuration issues."
-                all_ok_final = unity_path_ok and unity_version_ok and unity_projects_path_ok and apis_key_ok and apis_models_ok
-                mtype = messagebox.showinfo if all_ok_final else messagebox.showwarning
-                title = "Verification Complete" if all_ok_final else "Configuration Issues Found"
-                main_window.after(300 if on_startup else 0, lambda t=title, msg=dialog_message: mtype(t, msg))
-        elif not main_window or not main_window.winfo_exists():
-            pass
-    except Exception as ui_err:
+            all_simulations_data = get_simulations()
+            main_window.after(100, filter_simulations)
+            if on_startup and should_blink_settings:
+                startup_message = "Initial Configuration Issues Found:\n\n" + "\n".join([r for r in results if '❌' in r or '⚠️' in r]) + "\n\nPlease use 'Settings' to correct the .env file and then click 'Verify Config'."
+                main_window.after(300, lambda m=startup_message: messagebox.showwarning("Initial Configuration Issues", m))
+    except Exception:
         pass
+    if show_results_box:
+        results_text = "Configuration Verification Results:\n\n" + "\n".join(results)
+        all_checks_ok = unity_path_ok and unity_version_ok and unity_projects_path_ok and apis_key_ok and apis_models_ok
+        if 'main_window' in globals() and main_window and main_window.winfo_exists():
+             message_type = messagebox.showinfo if all_checks_ok else messagebox.showwarning
+             popup_title = "Verification Complete" if all_checks_ok else "Verification Issues Found"
+             main_window.after(0, lambda title=popup_title, msg=results_text: message_type(title, msg))
 
 def open_config_window():
     stop_settings_button_blink()
-    cfg = ctk.CTkToplevel(main_window)
-    cfg.title("Settings (Local)")
-    apply_icon(cfg)
-    center_window(cfg, 700, 250)
-    cfg.resizable(False, False)
-    cfg.transient(main_window)
-    cfg.grab_set()
-    frame = ctk.CTkFrame(cfg)
+    if 'main_window' not in globals() or not main_window: return
+    config_win = ctk.CTkToplevel(main_window)
+    config_win.title("Settings (.env Configuration)")
+    apply_icon(config_win)
+    center_window(config_win, 700, 300)
+    config_win.resizable(False, False)
+    config_win.transient(main_window)
+    config_win.grab_set()
+    frame = ctk.CTkFrame(config_win)
     frame.pack(fill="both", expand=True, padx=20, pady=20)
     frame.grid_columnconfigure(1, weight=1)
-    entries: Dict[str, ctk.StringVar] = {}
-
-    def on_config_close_action():
-        cfg.destroy()
-        if 'main_window' in globals() and main_window and main_window.winfo_exists():
-            main_window.after(100, lambda: threading.Thread(target=perform_verification, args=(True, False), daemon=True).start())
-
-
-    def create_row(r, lbl, var, key, isf=True, isp=True):
-        ctk.CTkLabel(frame, text=lbl, anchor="w", font=APP_FONT).grid(row=r, column=0, padx=(0, 10), pady=5, sticky="w")
-        val = os.getenv(var, "")
-        ev = ctk.StringVar(value=val)
-        entries[key] = ev
-        ew = ctk.CTkEntry(frame, textvariable=ev, font=APP_FONT)
-        ew.grid(row=r, column=1, padx=5, pady=5, sticky="ew")
-        if isp:
-            def browse():
-                init = "/"
-                cur = ev.get()
-                if cur:
-                    p = Path(cur)
-                    init = str(p.parent) if p.is_file() else (str(p) if p.is_dir() else (str(p.parent) if p.parent.is_dir() else "/"))
-                path = filedialog.askopenfilename(title=f"Select {lbl}", initialdir=init, parent=cfg) if isf else filedialog.askdirectory(title=f"Select {lbl}", initialdir=init, parent=cfg)
-                if path:
-                    ev.set(str(Path(path).resolve()))
-            bb = ctk.CTkButton(frame, text="...", width=30, command=browse, font=APP_FONT)
-            bb.grid(row=r, column=2, padx=(5, 0), pady=5)
+    entries = {}
+    def create_row(parent_frame, row_index, label_text, env_variable_name, dict_key, is_file=True, add_browse_button=True):
+        ctk.CTkLabel(parent_frame, text=label_text, anchor="w", font=APP_FONT).grid(row=row_index, column=0, padx=(0, 10), pady=5, sticky="w")
+        current_value = os.environ.get(env_variable_name, "")
+        entry_var = ctk.StringVar(value=current_value)
+        entries[dict_key] = entry_var
+        entry_widget = ctk.CTkEntry(parent_frame, textvariable=entry_var, font=APP_FONT)
+        entry_widget.grid(row=row_index, column=1, padx=5, pady=5, sticky="ew")
+        if add_browse_button:
+            def browse_action():
+                initial_dir = os.path.expanduser("~")
+                current_path = entry_var.get()
+                if current_path and os.path.exists(current_path):
+                    initial_dir = os.path.dirname(current_path) if os.path.isfile(current_path) else current_path
+                if is_file:
+                    selected_path = filedialog.askopenfilename(title=f"Select {label_text}", initialdir=initial_dir, parent=config_win, filetypes=[("Executable", "*.exe")])
+                else:
+                    selected_path = filedialog.askdirectory(title=f"Select {label_text}", initialdir=initial_dir, parent=config_win)
+                if selected_path:
+                    entry_var.set(os.path.normpath(selected_path))
+            browse_button = ctk.CTkButton(parent_frame, text="...", width=30, command=browse_action, font=APP_FONT)
+            browse_button.grid(row=row_index, column=2, padx=(5, 0), pady=5)
         else:
             frame.grid_columnconfigure(2, weight=0, minsize=35)
-
-    create_row(0, "Unity Exe:", "UNITY_EXECUTABLE", "unity_exe", True, True)
-    create_row(1, "Unity Proj Fldr:", "UNITY_PROJECTS_PATH", "projects_path", False, True)
-    create_row(2, "API Server URL:", "API_BASE_URL", "api_url", False, False)
-    create_row(3, "API Key (Client):", "API_KEY", "api_key", False, False)
-
-    bf = ctk.CTkFrame(cfg, fg_color="transparent")
-    bf.pack(fill="x", padx=20, pady=(0, 20))
-    bf.columnconfigure((0, 3), weight=1)
-    bf.columnconfigure((1, 2), weight=0)
-
-    def save():
-        global API_KEY
-        ue = entries['unity_exe'].get().strip()
-        pp = entries['projects_path'].get().strip()
-        au = entries['api_url'].get().strip()
-        ak = entries['api_key'].get().strip()
-        if not ue or not Path(ue).is_file():
-            messagebox.showerror("Error", "Unity Exe path not OK.", parent=cfg)
+    create_row(frame, 0, "Unity Executable:", "UNITY_EXECUTABLE", "unity_exe", is_file=True, add_browse_button=True)
+    create_row(frame, 1, "Unity Projects Folder:", "UNITY_PROJECTS_PATH", "projects_path", is_file=False, add_browse_button=True)
+    create_row(frame, 2, "API Server URL:", "API_BASE_URL", "api_url", add_browse_button=False)
+    create_row(frame, 3, "API Key (Client):", "API_KEY", "api_key", add_browse_button=False)
+    button_frame_bottom = ctk.CTkFrame(config_win, fg_color="transparent")
+    button_frame_bottom.pack(fill="x", padx=20, pady=(0, 20))
+    button_frame_bottom.columnconfigure(0, weight=1)
+    button_frame_bottom.columnconfigure(1, weight=0)
+    button_frame_bottom.columnconfigure(2, weight=0)
+    button_frame_bottom.columnconfigure(3, weight=1)
+    def save_config_action():
+        unity_exe_path = entries['unity_exe'].get().strip()
+        projects_folder_path = entries['projects_path'].get().strip()
+        api_url = entries['api_url'].get().strip()
+        api_key = entries['api_key'].get().strip()
+        if not unity_exe_path or not projects_folder_path:
+            messagebox.showerror("Input Error", "Unity Executable and Projects Folder paths are required.", parent=config_win)
             return
-        if not pp or not Path(pp).is_dir():
-            messagebox.showerror("Error", "Proj path not OK.", parent=cfg)
+        if not api_url:
+            messagebox.showwarning("Warning", "API Server URL is empty.\nAPI features will be disabled.", parent=config_win)
+        elif not (api_url.startswith("http://") or api_url.startswith("https://")):
+            messagebox.showerror("Input Error", "API URL format is invalid (must start with http:// or https://).", parent=config_win)
             return
-        if not au or not (au.startswith("http://") or au.startswith("https://")):
-            messagebox.showerror("Error", "API URL not OK (http(s)://...).", parent=cfg)
-            return
-        if not ak:
-            messagebox.showwarning("Warning", "The API Key (Client) field is empty.\nAuthentication with the API server will fail.", parent=cfg)
+        if not api_key:
+            messagebox.showwarning("Warning", "The API Key (Client) field is empty.\nAuthentication with the API server will fail, disabling API features.", parent=config_win)
         try:
-            content = f"UNITY_EXECUTABLE={ue}\nUNITY_PROJECTS_PATH={pp}\nAPI_BASE_URL={au}\nAPI_KEY={ak}\n"
-            Path(".env").write_text(content, "utf-8")
-            API_KEY = ak
-            messagebox.showinfo("OK", "Local config OK.\nRe-verifying...", parent=cfg)
-            on_config_close_action() # Call the unified close action
+            with open(DOTENV_PATH, "w", encoding='utf-8') as f:
+                f.write(f"UNITY_EXECUTABLE={unity_exe_path}\n")
+                f.write(f"UNITY_PROJECTS_PATH={projects_folder_path}\n")
+                f.write(f"API_BASE_URL={api_url}\n")
+                f.write(f"API_KEY={api_key}\n")
+            messagebox.showinfo("Success", "Settings saved to .env file.\nRe-running verification...", parent=config_win)
+            config_win.destroy()
+            if 'main_window' in globals() and main_window:
+                main_window.after(100, lambda: perform_verification(show_results_box=True))
         except Exception as e:
-            messagebox.showerror("Save Error", f"Failed to write .env:\n{e}", parent=cfg)
-
-    idx = get_color_mode_index()
-    saveb = ctk.CTkButton(bf, text="Save & Verify", command=save, font=APP_FONT, fg_color=COLOR_SUCCESS_GENERAL[idx], hover_color=COLOR_INFO_GENERAL[idx])
-    saveb.grid(row=0, column=1, padx=10, pady=10)
-    cancelb = ctk.CTkButton(bf, text="Cancel", command=on_config_close_action, font=APP_FONT, fg_color=COLOR_WARNING_GENERAL[idx], hover_color=COLOR_DANGER_GENERAL[idx])
-    cancelb.grid(row=0, column=2, padx=10, pady=10)
-    cfg.protocol("WM_DELETE_WINDOW", on_config_close_action)
-
+            messagebox.showerror("Save Error", f"Could not write to the .env file:\n{e}", parent=config_win)
+    mode_idx = get_color_mode_index()
+    save_button = ctk.CTkButton(button_frame_bottom, text="Save and Verify", command=save_config_action, font=APP_FONT,
+                                fg_color=COLOR_SUCCESS_GENERAL[mode_idx], hover_color=COLOR_INFO_GENERAL[mode_idx])
+    save_button.grid(row=0, column=1, padx=10, pady=10)
+    cancel_button = ctk.CTkButton(button_frame_bottom, text="Cancel", command=config_win.destroy, font=APP_FONT,
+                                  fg_color=COLOR_WARNING_GENERAL[mode_idx], hover_color=COLOR_DANGER_GENERAL[mode_idx])
+    cancel_button.grid(row=0, column=2, padx=10, pady=10)
+    config_win.wait_window()
 
 class UnityHubInfoDialog(ctk.CTkToplevel):
     def __init__(self, parent, title, message_text, download_url):
@@ -2190,8 +1907,8 @@ class UnityHubInfoDialog(ctk.CTkToplevel):
             original_text = self.copy_button.cget("text")
             self.copy_button.configure(text="Copied!", state="disabled")
             self.after(1500, lambda: self.copy_button.configure(text=original_text, state="normal"))
-        except Exception as e:
-            messagebox.showerror("Clipboard Error", f"Could not copy link to clipboard:\n{e}", parent=self)
+        except Exception:
+            messagebox.showerror("Clipboard Error", "Could not copy link to clipboard.", parent=self)
 
     def open_download_page(self):
         try:
@@ -2229,19 +1946,33 @@ def handle_unity_download_click():
     )
     full_message_text = instructions + troubleshooting
     try:
-        opened = webbrowser.open(unity_hub_uri)
-        if not opened:
-            pass
-    except Exception as e:
+        webbrowser.open(unity_hub_uri)
+    except Exception:
         pass
     if 'main_window' in globals() and main_window and main_window.winfo_exists():
-        dialog = UnityHubInfoDialog(
+        UnityHubInfoDialog(
             parent=main_window,
             title="Download Unity Editor / Hub Instructions",
             message_text=full_message_text,
             download_url=hub_download_link
         )
-    else:
+
+def cleanup_simulation_logger_data(actual_simulation_names: set):
+    logger_data_path = None
+    try:
+        persistent_path = find_unity_persistent_path(UNITY_PRODUCT_NAME)
+        if not persistent_path:
+            return
+        logger_data_path = persistent_path / LOG_SUBFOLDER
+        if not logger_data_path.is_dir():
+            return
+        for item in logger_data_path.iterdir():
+            if item.is_dir() and item.name not in actual_simulation_names:
+                try:
+                    shutil.rmtree(item)
+                except (PermissionError, OSError):
+                    pass
+    except Exception:
         pass
 
 def populate_simulations():
@@ -2264,12 +1995,11 @@ def populate_simulations():
             try:
                 state_file_path.unlink()
                 last_simulation_loaded = None
-            except PermissionError:
-                pass
-            except Exception as e:
+            except (PermissionError, Exception):
                 pass
         else:
             last_simulation_loaded = None
+    cleanup_simulation_logger_data(actual_sim_names)
     all_simulations_data.sort(key=lambda x: x.get('name', '').lower())
     filter_simulations()
     status_msg = f"List refreshed. Found {len(all_simulations_data)} total simulation(s)."
@@ -2285,7 +2015,7 @@ def filter_simulations(event=None):
     try:
         for item in sim_tree.get_children():
             sim_tree.delete(item)
-    except tk.TclError as e:
+    except tk.TclError:
         return
     displayed_count = 0
     for sim_data in all_simulations_data:
@@ -2311,7 +2041,7 @@ def filter_simulations(event=None):
                             ),
                             tags=tuple(item_tags))
             displayed_count += 1
-        except tk.TclError as e:
+        except tk.TclError:
             pass
     status_msg = status_label.cget("text")
     if initial_verification_complete:
@@ -2356,21 +2086,20 @@ def update_button_states():
         if 'reload_btn' in globals(): reload_btn.configure(state=get_state(reload_enabled), fg_color=BTN_RELOAD_FG_COLOR[mode_idx] if reload_enabled else disabled_fg)
         if 'graph_btn' in globals(): graph_btn.configure(state=get_state(graph_enabled), fg_color=BTN_GRAPH_FG_COLOR[mode_idx] if graph_enabled else disabled_fg)
         if 'create_btn' in globals(): create_btn.configure(state=get_state(create_enabled), fg_color=BTN_CREATE_FG_COLOR[mode_idx] if create_enabled else disabled_fg)
-        
         if settings_button_blink_job is None:
-            if 'settings_btn' in globals(): settings_btn.configure(state=get_state(settings_enabled), fg_color=BTN_SETTINGS_FG_COLOR[mode_idx] if settings_enabled else disabled_fg)
+            if 'settings_btn' in globals():
+                settings_btn.configure(state=get_state(settings_enabled), fg_color=BTN_SETTINGS_FG_COLOR[mode_idx] if settings_enabled else disabled_fg)
         elif 'settings_btn' in globals():
-             settings_btn.configure(state=get_state(settings_enabled))
-
-        if 'verify_btn' in globals(): verify_btn.configure(state=get_state(verify_enabled), fg_color=BTN_VERIFY_FG_COLOR[mode_idx] if verify_enabled else disabled_fg)
+            settings_btn.configure(state=get_state(settings_enabled))
+        if 'verify_btn' in globals(): verify_btn.configure(state=get_state(verify_enabled), fg_color=BTN_VERIFY_FG_COLOR[mode_idx], hover_color=BTN_VERIFY_HOVER_COLOR[mode_idx], text_color=BTN_VERIFY_TEXT_COLOR[mode_idx])
         if 'clear_cache_btn' in globals(): clear_cache_btn.configure(state=get_state(clear_cache_enabled), fg_color=BTN_EXIT_FG_COLOR[mode_idx] if clear_cache_enabled else disabled_fg)
-        if 'unity_down_btn' in globals(): unity_down_btn.configure(state=get_state(unity_down_enabled), fg_color=BTN_UNITY_DOWN_FG_COLOR[mode_idx] if unity_down_enabled else disabled_fg)
-        if 'about_btn' in globals(): about_btn.configure(state=get_state(about_enabled), fg_color=BTN_ABOUT_FG_COLOR[mode_idx] if about_enabled else disabled_fg)
-        if 'exit_btn' in globals(): exit_btn.configure(state=get_state(exit_enabled), fg_color=BTN_EXIT_FG_COLOR[mode_idx] if exit_enabled else disabled_fg)
+        if 'unity_down_btn' in globals(): unity_down_btn.configure(state=get_state(unity_down_enabled), fg_color=BTN_UNITY_DOWN_FG_COLOR[mode_idx], hover_color=BTN_UNITY_DOWN_HOVER_COLOR[mode_idx], text_color=BTN_UNITY_DOWN_TEXT_COLOR[mode_idx])
+        if 'about_btn' in globals(): about_btn.configure(state=get_state(about_enabled), fg_color=BTN_ABOUT_FG_COLOR[mode_idx], hover_color=BTN_ABOUT_HOVER_COLOR[mode_idx], text_color=BTN_ABOUT_TEXT_COLOR[mode_idx])
+        if 'exit_btn' in globals(): exit_btn.configure(state=get_state(exit_enabled), fg_color=BTN_EXIT_FG_COLOR[mode_idx], hover_color=BTN_EXIT_HOVER_COLOR[mode_idx], text_color=BTN_EXIT_TEXT_COLOR[mode_idx])
         if 'theme_switch' in globals(): theme_switch.configure(state=get_state(theme_switch_enabled))
         if 'search_entry' in globals(): search_entry.configure(state=get_state(search_enabled))
-        if 'clear_search_btn' in globals(): clear_search_btn.configure(state=get_state(search_enabled), fg_color=BTN_CLEARSEARCH_FG_COLOR[mode_idx] if search_enabled else disabled_fg)
-    except (NameError, tk.TclError) as e:
+        if 'clear_search_btn' in globals(): clear_search_btn.configure(state=get_state(search_enabled), fg_color=BTN_CLEARSEARCH_FG_COLOR[mode_idx], hover_color=BTN_CLEARSEARCH_HOVER_COLOR[mode_idx], text_color=BTN_CLEARSEARCH_TEXT_COLOR[mode_idx])
+    except (NameError, tk.TclError):
         pass
 
 def on_load_simulation_request(simulation_name: str):
@@ -2410,7 +2139,7 @@ def load_simulation_logic(simulation_name: str):
         else:
             update_status(f"Error loading files for '{simulation_name}'. Load process stopped.");
             if 'main_window' in globals() and main_window: main_window.after(10, enable_all_interactions)
-    except Exception as e:
+    except Exception:
         update_status(f"Critical error during load sequence for '{simulation_name}'. Check console.")
         if 'main_window' in globals() and main_window: main_window.after(10, enable_all_interactions)
 
@@ -2447,46 +2176,36 @@ def on_show_graphs_thread():
     graph_thread.start()
 
 def show_graphs_logic(sim_name: str):
-    if not callable(globals().get('find_simulation_data_path')) or \
-        not callable(globals().get('SimulationGraphics')) or \
-        not callable(globals().get('open_graphs_folder')):
-        messagebox.showerror("Internal Error", "Required graph generation functions (find_simulation_data_path, SimulationGraphics, open_graphs_folder) are not defined.")
+    if not all(callable(globals().get(f)) for f in ['find_simulation_data_path', 'SimulationGraphics', 'open_graphs_folder']):
+        messagebox.showerror("Internal Error", "Required graph generation functions are not defined.")
         if 'main_window' in globals() and main_window: main_window.after(0, enable_all_interactions)
         return
     try:
-        if callable(globals().get('update_status')): update_status(f"Locating data for '{sim_name}'...")
+        update_status(f"Locating data for '{sim_name}'...")
         simulation_data_dir = find_simulation_data_path(sim_name)
         if not simulation_data_dir:
-            if callable(globals().get('update_status')): update_status(f"Error: Data directory not found for '{sim_name}'.")
+            update_status(f"Error: Data directory not found for '{sim_name}'.")
             return
         csv_path = simulation_data_dir / CSV_FILENAME
-        graphs_dir = simulation_data_dir / GRAPHICS_SUBFOLDER
         if not csv_path.is_file():
             messagebox.showerror("Missing Data",
-                                    f"The required statistics file ('{CSV_FILENAME}') for simulation '{sim_name}' was not found in:\n{simulation_data_dir}\n\nCannot generate graphs.")
-            if callable(globals().get('update_status')): update_status(f"Error: Statistics CSV file missing for '{sim_name}'.")
+                                 f"The required statistics file ('{CSV_FILENAME}') for simulation '{sim_name}' was not found in:\n{simulation_data_dir}\n\nCannot generate graphs.")
+            update_status(f"Error: Statistics CSV file missing for '{sim_name}'.")
             return
-        if callable(globals().get('update_status')): update_status(f"Generating graphs for '{sim_name}'...")
+        update_status(f"Generating graphs for '{sim_name}'...")
         SimulationGraphics(sim_name)
-        if callable(globals().get('update_status')): update_status(f"Graph generation attempted. Opening graphs folder for '{sim_name}'...")
+        update_status(f"Graph generation attempted. Opening graphs folder for '{sim_name}'...")
         open_graphs_folder(sim_name)
-        if callable(globals().get('update_status')): update_status(f"Graph process completed for '{sim_name}'.")
+        update_status(f"Graph process completed for '{sim_name}'.")
     except FileNotFoundError as e:
         messagebox.showerror("File Error", f"A required file was not found during the graph process:\n{e}")
-        if callable(globals().get('update_status')): update_status(f"Error: File not found while processing '{sim_name}'.")
+        update_status(f"Error: File not found while processing '{sim_name}'.")
     except Exception as e:
         messagebox.showerror("Unexpected Error", f"An unexpected error occurred while processing graphs for '{sim_name}':\n{type(e).__name__}: {e}")
-        if callable(globals().get('update_status')): update_status(f"Error processing graphs for '{sim_name}'. Check console.")
+        update_status(f"Error processing graphs for '{sim_name}'. Check console.")
     finally:
-        try:
-            if 'main_window' in globals() and main_window is not None and main_window.winfo_exists():
-                main_window.after(0, enable_all_interactions)
-            elif callable(globals().get('enable_all_interactions')):
-                enable_all_interactions()()
-        except NameError:
-            pass
-        except Exception as e:
-            pass
+        if 'main_window' in globals() and main_window.winfo_exists():
+            main_window.after(0, enable_all_interactions)
 
 def on_create_simulation():
     global is_build_running
@@ -2585,7 +2304,7 @@ def handle_tree_click(event):
                 elif column_name == "col_delete":
                     on_delete_simulation_request(simulation_name)
             else: cancel_tooltip(sim_tree)
-        except (ValueError, IndexError, tk.TclError) as e:
+        except (ValueError, IndexError, tk.TclError):
             cancel_tooltip(sim_tree)
     elif region == "heading":
         pass
@@ -2620,7 +2339,7 @@ def handle_tree_motion(event):
                 else:
                     cancel_tooltip(sim_tree)
             else: cancel_tooltip(sim_tree)
-        except (ValueError, IndexError, tk.TclError) as e:
+        except (ValueError, IndexError, tk.TclError):
             cancel_tooltip(sim_tree)
     else:
         cancel_tooltip(sim_tree)
@@ -2628,10 +2347,13 @@ def handle_tree_motion(event):
 def handle_tree_leave(event):
     cancel_tooltip(sim_tree)
 
-def load_logo(image_path: str, target_width: int) -> Union[ImageTk.PhotoImage, None]:
+def load_logo(image_path: Union[str, Path], target_width: int) -> Union[ImageTk.PhotoImage, None]:
     global logo_photo_ref
     try:
-        img = Image.open(image_path)
+        image_path_obj = Path(image_path)
+        if not image_path_obj.is_file():
+            return None
+        img = Image.open(image_path_obj)
         width_percent = (target_width / float(img.size[0]))
         new_height = int((float(img.size[1]) * float(width_percent)))
         img = img.resize((target_width, new_height), Image.Resampling.LANCZOS)
@@ -2639,7 +2361,7 @@ def load_logo(image_path: str, target_width: int) -> Union[ImageTk.PhotoImage, N
         return logo_photo_ref
     except FileNotFoundError:
         return None
-    except Exception as e:
+    except Exception:
         return None
 
 def update_treeview_style():
@@ -2658,7 +2380,7 @@ def update_treeview_style():
         even_row_bg = main_window._apply_appearance_mode(("#F5F5F5", "#343434"))
         loaded_row_bg = main_window._apply_appearance_mode(("#E8F5E9", "#2E7D32"))
         loaded_row_fg = fg_color
-    except Exception as e:
+    except Exception:
         if mode_str == "Dark":
             bg_color, fg_color = "#2B2B2B", "white"
             select_bg_color, select_fg_color = "#565B5E", "white"
@@ -2727,10 +2449,11 @@ def toggle_appearance_mode():
         if 'graph_btn' in globals(): graph_btn.configure(fg_color=BTN_GRAPH_FG_COLOR[mode_idx], hover_color=BTN_GRAPH_HOVER_COLOR[mode_idx], text_color=BTN_GRAPH_TEXT_COLOR[mode_idx])
         if 'create_btn' in globals(): create_btn.configure(fg_color=BTN_CREATE_FG_COLOR[mode_idx], hover_color=BTN_CREATE_HOVER_COLOR[mode_idx], text_color=BTN_CREATE_TEXT_COLOR[mode_idx])
         if 'clear_search_btn' in globals(): clear_search_btn.configure(fg_color=BTN_CLEARSEARCH_FG_COLOR[mode_idx], hover_color=BTN_CLEARSEARCH_HOVER_COLOR[mode_idx], text_color=BTN_CLEARSEARCH_TEXT_COLOR[mode_idx])
+        if 'clear_cache_btn' in globals(): clear_cache_btn.configure(fg_color=BTN_EXIT_FG_COLOR[mode_idx], hover_color=BTN_EXIT_HOVER_COLOR[mode_idx], text_color=BTN_EXIT_TEXT_COLOR[mode_idx])
         update_button_states()
-    except NameError as e:
+    except NameError:
         pass
-    except Exception as e:
+    except Exception:
         pass
 
 main_window = ctk.CTk()
@@ -2768,7 +2491,6 @@ verify_btn = ctk.CTkButton(sidebar_frame, text="Verify Config", command=lambda: 
                                 fg_color=BTN_VERIFY_FG_COLOR[mode_idx], hover_color=BTN_VERIFY_HOVER_COLOR[mode_idx], text_color=BTN_VERIFY_TEXT_COLOR[mode_idx])
 verify_btn.pack(fill="x", padx=15, pady=5)
 
-global clear_cache_btn
 clear_cache_btn = ctk.CTkButton(sidebar_frame, text="Clear API Cache",
                                  command=clear_api_cache,
                                  font=APP_FONT,
@@ -2776,7 +2498,6 @@ clear_cache_btn = ctk.CTkButton(sidebar_frame, text="Clear API Cache",
                                  hover_color=BTN_EXIT_HOVER_COLOR[mode_idx],
                                  text_color=BTN_EXIT_TEXT_COLOR[mode_idx])
 clear_cache_btn.pack(fill="x", padx=15, pady=5)
-
 
 separator = ctk.CTkFrame(sidebar_frame, height=2, fg_color="gray")
 separator.pack(fill="x", padx=15, pady=15)
@@ -2864,7 +2585,7 @@ def sort_column(tree, col, reverse):
             if c == col:
                 heading_text += (' ▼' if reverse else ' ▲')
             tree.heading(c, text=heading_text, command=lambda c_ref=c: sort_column(tree, c_ref, not sort_order.get(c_ref, False)), anchor=anchor_dir)
-    except Exception as e:
+    except Exception:
         pass
 
 for col_name in columns:

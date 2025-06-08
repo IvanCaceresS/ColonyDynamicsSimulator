@@ -1,5 +1,6 @@
 import sys
 import os
+import textwrap
 import traceback
 import shutil
 import subprocess
@@ -21,7 +22,6 @@ from PIL import Image, ImageTk
 import re
 import requests
 from typing import Union, Tuple, Dict, List, Any, Optional, Callable
-import plistlib
 import numpy as np
 from scipy.optimize import curve_fit
 from sklearn.metrics import r2_score
@@ -75,6 +75,7 @@ COLOR_INFO_GENERAL = ("#218838", "#66BB6A")
 COLOR_WARNING_GENERAL = ("#E53935", "#E53935")
 COLOR_DISABLED_GENERAL = ("#BDBDBD", "#757575")
 COLOR_SIDEBAR_BG = None
+settings_button_blink_job = None
 
 def get_color_mode_index():
     return 1 if ctk.get_appearance_mode() == "Dark" else 0
@@ -82,6 +83,7 @@ def get_color_mode_index():
 _NEUTRAL_FG_COLOR = ("#A0A0A0", "#616161")
 _NEUTRAL_HOVER_COLOR = ("#888888", "#757575")
 _NEUTRAL_TEXT_COLOR = ("#000000", "#FFFFFF")
+_BLINK_COLOR = ("#FFD900", "#FF9800")
 BTN_SETTINGS_FG_COLOR = _NEUTRAL_FG_COLOR
 BTN_SETTINGS_HOVER_COLOR = _NEUTRAL_HOVER_COLOR
 BTN_SETTINGS_TEXT_COLOR = _NEUTRAL_TEXT_COLOR
@@ -436,167 +438,195 @@ def call_primary_model_via_api(question: str) -> Tuple[str, int, int, Optional[s
         return "", 0, 0, f"API Error (primary): {resp['error']}"
     return resp.get('reply', ''), resp.get('input_tokens', 0), resp.get('output_tokens', 0), None
 
-def split_braces_outside_strings(code: str) -> str:
-    result_lines = []
-    in_string = False
-    for line in code.splitlines(keepends=True):
-        new_line_chars = []
-        i = 0
-        while i < len(line):
-            ch = line[i]
-            if ch == '"':
-                in_string = not in_string
-                new_line_chars.append(ch)
-            elif ch == '{' and not in_string:
-                new_line_chars.append('\n{\n')
-            elif ch == '}' and not in_string:
-                new_line_chars.append('\n}\n')
-            else:
-                new_line_chars.append(ch)
-            i += 1
-        result_lines.append(''.join(new_line_chars))
-    return ''.join(result_lines)
+def _insert_code_between_markers(template_content: str, code_to_insert: str, start_marker: str, end_marker: str) -> Union[str, None]:
+    pattern = re.compile(re.escape(start_marker) + r'.*?' + re.escape(end_marker), re.DOTALL)
+    match = pattern.search(template_content)
+    if not match:
+        return None
+    start_index = match.start()
+    end_index = match.end()
+    new_block = f"{start_marker}\n{code_to_insert}\n{end_marker}"
+    return template_content[:start_index] + new_block + template_content[end_index:]
 
-def separar_codigos_por_archivo(respuesta: str) -> dict:
-    patrones = re.findall(r'(\d+)\.(\w+\.cs)\{(.*?)}(?=\d+\.|$)', respuesta, re.DOTALL)
-    if not patrones:
-        return {}
+def separar_codigos_por_archivo(respuesta: str) -> Dict[str, str]:
+    actual_content = respuesta.strip().strip('"')
+    regex_especifico = r"1\.PrefabMaterialCreator\.cs\{(.*?)\}2\.OrganismTypes\{(.*?)\}"
+    match = re.search(regex_especifico, actual_content, re.DOTALL)
     codigos = {}
-    for _, archivo, contenido in patrones:
-        codigos[archivo] = format_csharp(contenido.strip())
+    if match:
+        codigos["PrefabMaterialCreator.cs"] = match.group(1).strip()
+        codigos["OrganismTypes"] = match.group(2).strip()
+    else:
+        print("Warning: Response string does not match expected format.")
     return codigos
 
-def format_csharp(contenido: str) -> str:
-    preprocesado = split_braces_outside_strings(contenido)
-    preprocesado = re.sub(r';', r';\n', preprocesado)
-    preprocesado = re.sub(r'\n\s*\n', '\n', preprocesado)
-    lineas = [l.strip() for l in preprocesado.split('\n') if l.strip()]
-    nivel_indentacion = 0
-    contenido_formateado = []
-    indent_char = "    "
-    for linea in lineas:
-        if linea.startswith("}"):
-            nivel_indentacion = max(nivel_indentacion - 1, 0)
-        contenido_formateado.append(indent_char * nivel_indentacion + linea)
-        if linea.endswith("{"):
-            nivel_indentacion += 1
-    return "\n".join(contenido_formateado)
+def get_collider_templates() -> dict:
+    return {
+        "Bacilo": textwrap.dedent("""
+            colliderAsset = Unity.Physics.CapsuleCollider.Create(new CapsuleGeometry
+            {
+                Vertex0 = new float3(0, -__LENGTH__ * 0.5f, 0), Vertex1 = new float3(0, __LENGTH__ * 0.5f, 0), Radius = __RADIUS__
+            }, CollisionFilter.Default, physicsMat);
+        """).strip(),
+        "Cocco": textwrap.dedent("""
+            colliderAsset = Unity.Physics.SphereCollider.Create(new SphereGeometry
+            {
+                Center = float3.zero, Radius = 0.5f
+            }, CollisionFilter.Default, physicsMat);
+        """).strip(),
+        "Helicoide": textwrap.dedent("""
+            colliderAsset = CreateHelicalCollider(__MAX_AXIAL_LENGTH__, physicsMat);
+        """).strip()
+    }
 
-def import_codes(codes: dict, simulation_name: str) -> bool:
-    base_dir = APP_BASE_DIR
-    simulation_folder = base_dir / "Simulations" / simulation_name
-    if simulation_folder.exists():
-        if simulation_folder.is_dir():
-             pass
-        else:
-             return False
-    template_folder = base_dir / "Template"
-    if not template_folder.exists() or not template_folder.is_dir():
-         return False
-    try:
-        if not simulation_folder.exists():
-            shutil.copytree(template_folder, simulation_folder)
-        else:
-            pass
-    except Exception:
+def parse_organism_data(input_str: str) -> list:
+    if not input_str.startswith('[') or not input_str.endswith(']'):
+        raise ValueError("Organism data must be enclosed in '[]'")
+    content = input_str.strip('[]')
+    organism_entries = re.split(r';\s*(?=[^)]*(?:\(|$))', content)
+    parsed_data = []
+    for entry in filter(None, (e.strip() for e in organism_entries)):
+        match = re.match(r'([^->]+)\s*->\s*([^()]+)\s*\((.*)\)', entry)
+        if not match:
+            print(f"Warning: Organism entry '{entry}' has incorrect format and will be ignored.")
+            continue
+        name, morphology, params_str = (m.strip() for m in match.groups())
+        params = {
+            key.strip(): value.strip()
+            for pair in re.split(r',\s*(?=[a-zA-Z0-9_]+\s*=)', params_str)
+            if '=' in pair
+            for key, value in [pair.split('=', 1)]
+        }
+        parsed_data.append({'name': name, 'morphology': morphology, 'params': params})
+    return parsed_data
+
+def generate_csharp_switch_cases(organism_data: list, templates: dict) -> str:
+    final_case_blocks = []
+    for organism in organism_data:
+        name, morphology, params = organism['name'], organism['morphology'], organism['params']
+        code_template = templates.get(morphology)
+        if not code_template:
+            body = f"// Morfología '{morphology}' no implementada."
+            full_block = f'            case "{name}":\n                {body}\n                break;'
+            final_case_blocks.append(full_block)
+            continue
+        body = ""
+        try:
+            if morphology == "Bacilo":
+                body = code_template.replace('__LENGTH__', params['Length']).replace('__RADIUS__', params['Radius'])
+            elif morphology == "Helicoide":
+                body = code_template.replace('__MAX_AXIAL_LENGTH__', params['MaxAxialLength'])
+            else:
+                body = code_template
+        except KeyError as e:
+            body = f"// Error: Parámetro {e} faltante para {name}."
+        indented_body = textwrap.indent(body, ' ' * 16)
+        full_block = f'            case "{name}":\n{indented_body}\n                break;'
+        final_case_blocks.append(full_block)
+    return "\n\n".join(final_case_blocks)
+
+def generate_csharp_if_else_block(organism_data: list) -> str:
+    EXCLUDED_PARAMS_BY_MORPHOLOGY = {
+        "Bacilo": {"Radius", "Length"}, "Cocco": {"Diameter"}, "Helicoide": set()
+    }
+    blocks = []
+    param_indent = ' ' * 16
+    for i, organism in enumerate(organism_data):
+        name, morphology = organism['name'], organism['morphology']
+        params_to_exclude = EXCLUDED_PARAMS_BY_MORPHOLOGY.get(morphology, set())
+        param_lines = [f"{param_indent}{key} = {value}," for key, value in organism['params'].items() if key not in params_to_exclude]
+        if param_lines: param_lines[-1] = param_lines[-1].rstrip(',')
+        params_code = "\n".join(param_lines)
+        keyword = "if" if i == 0 else "else if"
+        block = textwrap.dedent(f"""\
+            {keyword} (prefabName == "{name}")
+            {{
+                entityManager.AddComponentData(newEntity, new {name}Component
+                {{
+{params_code}
+                }});
+            }}""")
+        blocks.append(block.strip())
+    return "\n        ".join(blocks)
+
+def import_codes(codes: Dict[str, str], simulation_name: str) -> bool:
+    simulation_folder = SIMULATIONS_DIR / simulation_name
+    template_folder = APP_BASE_DIR / "Template"
+    if not template_folder.is_dir():
+        print(f"Error: Template folder not found at '{template_folder}'")
         return False
+    if not simulation_folder.exists():
+        try:
+            shutil.copytree(template_folder, simulation_folder)
+        except Exception as e:
+            print(f"Error creating simulation folder from template: {e}")
+            return False
     assets_editor_folder = simulation_folder / "Assets" / "Editor"
     assets_scripts_folder = simulation_folder / "Assets" / "Scripts"
     assets_scripts_components = assets_scripts_folder / "Components"
     assets_scripts_systems = assets_scripts_folder / "Systems"
     assets_scripts_general = assets_scripts_folder / "General"
-    assets_editor_folder.mkdir(parents=True, exist_ok=True)
-    assets_scripts_components.mkdir(parents=True, exist_ok=True)
-    assets_scripts_systems.mkdir(parents=True, exist_ok=True)
-    assets_scripts_general.mkdir(parents=True, exist_ok=True)
-    template_system_path = template_folder / "Assets" / "Scripts" / "Systems" / "GeneralSystem.cs"
-    if not template_system_path.exists():
-        template_system_path = None
-    template_create_path = template_folder / "Assets" / "Scripts" / "General" / "CreatePrefabsOnClick.cs"
-    if not template_create_path.exists():
-        template_create_path = None
+    for d in [assets_editor_folder, assets_scripts_components, assets_scripts_systems, assets_scripts_general]:
+        d.mkdir(parents=True, exist_ok=True)
     files_processed = []
-    for file_name, content in codes.items():
-        dest_path = ""
-        new_content = content
+    pmc_content = codes.get("PrefabMaterialCreator.cs")
+    if pmc_content:
+        dest_path = assets_editor_folder / "PrefabMaterialCreator.cs"
         try:
-            if file_name == "PrefabMaterialCreator.cs":
-                dest_path = assets_editor_folder / file_name
-                new_content = (
-                    "#if UNITY_EDITOR\n"
-                    "using UnityEngine;\n"
-                    "using UnityEditor;\n"
-                    "using System.IO;\n\n"
-                    f"{content}\n"
-                    "#endif\n"
-                )
-            elif "Component.cs" in file_name:
-                dest_path = assets_scripts_components / file_name
-            elif "System.cs" in file_name:
-                dest_path = assets_scripts_systems / file_name
-                if template_system_path:
+            with open(dest_path, "r+", encoding="utf-8") as f:
+                template_text = f.read()
+                new_content = _insert_code_between_markers(template_text, pmc_content, "//CODE START", "//CODE END")
+                if new_content:
+                    f.seek(0); f.write(new_content); f.truncate()
+                    files_processed.append(dest_path)
+        except Exception as e:
+            print(f"Error processing PrefabMaterialCreator.cs: {e}")
+    organism_types_content = codes.get("OrganismTypes")
+    if organism_types_content:
+        try:
+            organisms = parse_organism_data(organism_types_content)
+            cpoc_path = assets_scripts_general / "CreatePrefabsOnClick.cs"
+            if cpoc_path.exists() and organisms:
+                switch_code = generate_csharp_switch_cases(organisms, get_collider_templates())
+                if_else_code = generate_csharp_if_else_block(organisms)
+                with open(cpoc_path, "r+", encoding="utf-8") as f:
+                    content = f.read()
+                    new_content = _insert_code_between_markers(content, if_else_code, "//if_else_block START", "//if_else_block END")
+                    if new_content:
+                        new_content = _insert_code_between_markers(new_content, switch_code, "//case statements START", "//case statements END")
+                    if new_content:
+                        f.seek(0); f.write(new_content); f.truncate()
+                        files_processed.append(cpoc_path)
+            for org in organisms:
+                name, morph, params = org['name'], org['morphology'], org['params']
+                for file_type in ["Component", "System"]:
+                    template_file = f"{morph}{file_type}.cs"
+                    source_path = template_folder / "Assets" / "Scripts" / f"{file_type}s" / template_file
+                    if source_path.exists():
+                        dest_file = f"{name}{file_type}.cs"
+                        dest_path = assets_scripts_folder / f"{file_type}s" / dest_file
+                        tpl_text = source_path.read_text(encoding='utf-8').replace(morph, name)
+                        if morph == "Bacilo" and file_type == "System":
+                            try:
+                                tpl_text = tpl_text.replace('__LENGTH__', params['Length'])
+                            except KeyError:
+                                print(f"Warning: 'Length' param not found for Bacilo '{name}'.")
+                        dest_path.write_text(tpl_text, encoding='utf-8')
+                        files_processed.append(dest_path)
+        except Exception as e:
+            print(f"Error processing OrganismTypes: {e}")
+    processed_basenames = {fp.name for fp in files_processed}
+    for template_base_name in ["Bacilo", "Cocco", "Helicoide"]:
+        for file_type in ["Component", "System"]:
+            filename_to_check = f"{template_base_name}{file_type}.cs"
+            if filename_to_check not in processed_basenames:
+                path_to_remove = simulation_folder / "Assets" / "Scripts" / f"{file_type}s" / filename_to_check
+                if path_to_remove.exists():
                     try:
-                        with open(template_system_path, "r", encoding="utf-8") as f:
-                            template_lines = f.readlines()
-                        organism_name = file_name.replace("System.cs", "")
-                        new_class_declaration = f"public partial class {organism_name}System : SystemBase"
-                        new_component_declaration = f"{organism_name}Component"
-                        temp_content = "".join(template_lines)
-                        temp_content = temp_content.replace("public partial class GeneralSystem : SystemBase", new_class_declaration)
-                        temp_content = temp_content.replace("GeneralComponent", new_component_declaration)
-                        template_lines = temp_content.splitlines(keepends=True)
-                        insertion_index = -1
-                        target_line_content = "transform.Scale=math.lerp(initialScale,maxScale,t);}"
-                        for i, line in enumerate(template_lines):
-                             if target_line_content in line.replace(" ", "").replace("\t", ""):
-                                 insertion_index = i
-                                 break
-                        if insertion_index != -1:
-                            template_lines.insert(insertion_index + 1, "\n" + content + "\n")
-                            new_content = "".join(template_lines)
-                        else:
-                            new_content = content
-                    except Exception:
-                        new_content = content
-            elif file_name == "CreatePrefabsOnClick.cs":
-                 dest_path = assets_scripts_general / file_name
-                 if template_create_path:
-                      try:
-                           with open(template_create_path, "r", encoding="utf-8") as f:
-                                template_lines = f.readlines()
-                           insertion_index = -1
-                           target_signature = "private void CargarPrefabs()"
-                           target_content_part = "Resources.LoadAll<GameObject>"
-                           for i, line in enumerate(template_lines):
-                                if target_signature in line and target_content_part in line:
-                                     insertion_index = i
-                                     break
-                           if insertion_index != -1:
-                                template_lines.insert(insertion_index + 1, "\n" + content + "\n")
-                                new_content = "".join(template_lines)
-                           else:
-                                new_content = content
-                      except Exception:
-                           new_content = content
-            else:
-                dest_path = assets_scripts_general / file_name
-            if dest_path:
-                dest_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(dest_path, "w", encoding="utf-8") as f:
-                    f.write(new_content)
-                files_processed.append(dest_path)
-        except Exception:
-            pass
-    template_system_dest = assets_scripts_systems / "GeneralSystem.cs"
-    if template_system_dest.exists():
-        try:
-            template_system_dest.unlink()
-        except Exception:
-            pass
-    if files_processed:
-        return True
-    else:
-        return False
+                        path_to_remove.unlink()
+                    except OSError as e:
+                        print(f"Error cleaning template '{filename_to_check}': {e}")
+    return bool(files_processed)
 
 DELIMITER = "%|%"
 RESPONSES_CSV = None
@@ -707,11 +737,36 @@ def get_cached_response(prompt: str) -> Union[str, None]:
          return None
     return None
 
+def clear_api_cache():
+    if 'RESPONSES_CSV' not in globals() or RESPONSES_CSV is None:
+        messagebox.showerror("Configuration Error", "Cache file path is not defined. Cannot clear.")
+        return
+    confirm = messagebox.askyesno(
+        "Confirm Cache Deletion",
+        f"Are you sure you want to permanently delete the API response cache file?\n\n({RESPONSES_CSV})\n",
+        icon='warning'
+    )
+    if not confirm:
+        update_status("Cache deletion cancelled by user.")
+        return
+    try:
+        if RESPONSES_CSV.is_file():
+            RESPONSES_CSV.unlink()
+            messagebox.showinfo("Success", "The cache file (Responses.csv) has been successfully deleted.")
+            update_status("API response cache cleared.")
+        else:
+            messagebox.showinfo("Information", "The cache file did not exist. Nothing was deleted.")
+            update_status("Cache clear attempted, but the file did not exist.")
+    except PermissionError:
+        messagebox.showerror("Permission Error", f"Could not delete the file. Please ensure it is not open in another program and that you have write permissions.\n\nPath: {RESPONSES_CSV}")
+        update_status("Permission error while clearing cache.")
+    except Exception as e:
+        messagebox.showerror("Unexpected Error", f"An unexpected error occurred while trying to delete the cache file:\n\n{e}")
+        update_status(f"Unexpected error while clearing cache: {e}")
+
 def api_manager(sim_name: str, sim_desc: str, use_cache: bool = True) -> Tuple[bool, Union[str, None]]:
     if not API_BASE_URL:
         return False, "Config Error: API_BASE_URL missing."
-    if not API_KEY:
-        return False, "Config Error: API_KEY missing."
     if not apis_key_ok or not apis_models_ok:
         return False, "API/Model Configuration Error: API key or required models failed verification. Please check Settings and Verify Config."
     fmt_q, tk_is, tk_os, err_s = call_secondary_model_via_api(sim_desc)
@@ -721,11 +776,13 @@ def api_manager(sim_name: str, sim_desc: str, use_cache: bool = True) -> Tuple[b
          return False, "Error from Secondary Model: API returned an empty response."
     fmt_q_s = fmt_q.strip()
     if fmt_q_s == "ERROR DE CONTENIDO":
-        return False, "Validation Failed: Description contains disallowed organisms or topics. Only EColi, SCerevisiae, or both allowed."
+        return False, "Validation Failed: The description contains content that is not suitable for a simulation of organisms with morphology (Bacilo, Cocco, Helicoide)."
     if fmt_q_s == "ERROR CANTIDAD EXCEDIDA":
-         return False, "Validation Failed: More than 2 organisms requested. Max limit: 2."
+        return False, "Validation Failed: More than 5 organisms were requested. Maximum limit: 5."
+    if fmt_q_s == "ERROR MORFOLOGIA NO ACEPTADA":
+        return False, "Validation Failed: The organism's morphology is not accepted or is not one of the allowed types (Bacilo, Cocco, Helicoide)."
     if fmt_q_s.upper().startswith("ERROR"):
-         return False, f"Error from Secondary Model: {fmt_q_s}"
+        return False, f"Error from Secondary Model: {fmt_q_s}"
     final_response: Optional[str] = None
     cache_hit = False
     total_tk_in = tk_is
@@ -752,7 +809,7 @@ def api_manager(sim_name: str, sim_desc: str, use_cache: bool = True) -> Tuple[b
         return False, "Critical Error: No valid final response obtained (neither from cache nor generated)."
     codes = separar_codigos_por_archivo(final_response)
     if not codes:
-        return False, f"Extraction Error: No valid C# code blocks found in the response."
+        return False, f"Extraction Error: No valid C# code blocks found in the response.\nStart of received response:\n{final_response[:800]}..."
     ok_import = import_codes(codes, sim_name)
     if ok_import:
         return True, None
@@ -871,7 +928,7 @@ def on_closing():
         return
     if messagebox.askokcancel(
         title="Exit Confirmation",
-        message="Are you sure you want to exit the Unity Simulation Manager?",
+        message="Are you sure you want to exit the Colony Dynamics Simulator?",
         icon='question'
         ):
         if callable(globals().get('update_status')): update_status("Closing application...")
@@ -1114,7 +1171,7 @@ def get_simulations() -> list[Dict]:
                     last_opened_file = item / "last_opened.txt"
                     if last_opened_file.is_file():
                         try:
-                            with open(last_opened_file, "r") as f:
+                            with open(last_opened_file, "r", encoding="utf-8") as f:
                                 last_opened_timestamp = float(f.read().strip())
                             last_opened_str = time.strftime("%y-%m-%d %H:%M", time.localtime(last_opened_timestamp))
                         except (ValueError, OSError): pass
@@ -1622,6 +1679,42 @@ def create_simulation_thread(sim_name: str, sim_desc: str):
         else:
              enable_all_interactions()
 
+def _perform_blink_animation():
+    global settings_button_blink_job
+    if 'settings_btn' in globals() and settings_btn.winfo_exists() and 'main_window' in globals() and main_window.winfo_exists():
+        mode_idx = get_color_mode_index()
+        current_fg_color_tuple = settings_btn.cget("fg_color")
+        normal_color_tuple = BTN_SETTINGS_FG_COLOR
+        hover_color_tuple = _BLINK_COLOR
+        actual_current_fg = settings_btn._apply_appearance_mode(current_fg_color_tuple)
+        actual_normal_color = settings_btn._apply_appearance_mode(normal_color_tuple[mode_idx])
+        if actual_current_fg == actual_normal_color:
+            settings_btn.configure(fg_color=hover_color_tuple[mode_idx])
+        else:
+            settings_btn.configure(fg_color=normal_color_tuple[mode_idx])
+        settings_button_blink_job = main_window.after(500, _perform_blink_animation)
+    else:
+        if settings_button_blink_job:
+            if 'main_window' in globals() and main_window.winfo_exists():
+                 main_window.after_cancel(settings_button_blink_job)
+            settings_button_blink_job = None
+
+def start_settings_button_blink():
+    global settings_button_blink_job
+    if settings_button_blink_job: return
+    if 'settings_btn' in globals() and settings_btn.winfo_exists() and 'main_window' in globals() and main_window.winfo_exists():
+        _perform_blink_animation()
+
+def stop_settings_button_blink():
+    global settings_button_blink_job
+    if settings_button_blink_job:
+        if 'main_window' in globals() and main_window.winfo_exists():
+             main_window.after_cancel(settings_button_blink_job)
+        settings_button_blink_job = None
+    if 'settings_btn' in globals() and settings_btn.winfo_exists():
+        mode_idx = get_color_mode_index()
+        settings_btn.configure(fg_color=BTN_SETTINGS_FG_COLOR[mode_idx])
+
 def perform_verification(show_results_box=False, on_startup=False):
     global unity_path_ok, unity_version_ok, unity_projects_path_ok, apis_key_ok, apis_models_ok, initial_verification_complete
     global UNITY_EXECUTABLE, UNITY_PROJECTS_PATH, API_BASE_URL, API_KEY
@@ -1679,6 +1772,9 @@ def perform_verification(show_results_box=False, on_startup=False):
         except Exception as path_e:
              results.append(f"⚠️ Project Paths: Error constructing paths: {path_e}")
              unity_projects_path_ok = False
+
+    should_blink_settings = not unity_path_ok or not unity_projects_path_ok or not API_BASE_URL or not API_KEY
+
     if not API_BASE_URL: results.append("❌ API Server URL: Missing in .env file."); results.append("   ↳ Cannot verify server/OpenAI config.")
     elif not API_KEY: results.append("❌ Client API Key: Missing in .env file."); results.append("   ↳ Cannot authenticate with API server.")
     else:
@@ -1702,23 +1798,36 @@ def perform_verification(show_results_box=False, on_startup=False):
             results.append(details.get('openai_api_key_status', '❔ OpenAI Key Status (Server): Unknown'))
             results.append(details.get('primary_model_status', '❔ Primary Model Status (Server): Unknown'))
             results.append(details.get('secondary_model_status', '❔ Secondary Model Status (Server): Unknown'))
+            should_blink_settings = should_blink_settings or not (apis_key_ok and apis_models_ok)
         except ImportError as imp_err:
-             results.append(f"❌ API Server Check: {imp_err}"); apis_key_ok = apis_models_ok = False
-        except requests.exceptions.ConnectionError: results.append(f"❌ API Server Check: CONNECTION FAILED! ({API_BASE_URL})"); apis_key_ok = apis_models_ok = False
-        except requests.exceptions.Timeout: results.append(f"❌ API Server Check: TIMEOUT! ({API_BASE_URL})"); apis_key_ok = apis_models_ok = False
+             results.append(f"❌ API Server Check: {imp_err}"); apis_key_ok = apis_models_ok = False; should_blink_settings = True
+        except requests.exceptions.ConnectionError: results.append(f"❌ API Server Check: CONNECTION FAILED! ({API_BASE_URL})"); apis_key_ok = apis_models_ok = False; should_blink_settings = True
+        except requests.exceptions.Timeout: results.append(f"❌ API Server Check: TIMEOUT! ({API_BASE_URL})"); apis_key_ok = apis_models_ok = False; should_blink_settings = True
         except requests.exceptions.RequestException as e:
             status = e.response.status_code if e.response is not None else '??'; err_txt = f"Request failed ({status})."; detail="N/A"
             if e.response is not None:
                 try: detail = e.response.json().get('error', e.response.text[:100]+'...')
                 except: detail = e.response.text[:100]+'...'; err_txt += f" Detail: {detail}"
                 if status == 403: err_txt += "\n   ↳ Access DENIED. Is Client API_KEY correct?"
-            results.append(f"❌ API Server Check: {err_txt}"); apis_key_ok = apis_models_ok = False
-        except Exception as e: results.append(f"❌ API Server Check: Unexpected error: {type(e).__name__}"); apis_key_ok = apis_models_ok = False
-    if not initial_verification_complete:
-        initial_verification_complete = True
+            results.append(f"❌ API Server Check: {err_txt}"); apis_key_ok = apis_models_ok = False; should_blink_settings = True
+        except Exception as e: results.append(f"❌ API Server Check: Unexpected error: {type(e).__name__}"); apis_key_ok = apis_models_ok = False; should_blink_settings = True
+    
+    initial_verification_complete = True
     unity_status = "Unity OK" if unity_path_ok and unity_version_ok and unity_projects_path_ok else "Unity ERR"
     api_status = "API OK" if apis_key_ok and apis_models_ok else "API ERR"
     final_status_string = f"Status: {unity_status} | {api_status}"
+
+    def update_blink_state_on_main_thread():
+        if 'settings_btn' in globals() and settings_btn.winfo_exists():
+            if should_blink_settings: start_settings_button_blink()
+            else: stop_settings_button_blink()
+    
+    if 'main_window' in globals() and main_window.winfo_exists():
+        if threading.current_thread() is not threading.main_thread():
+            main_window.after(0, update_blink_state_on_main_thread)
+        else:
+            update_blink_state_on_main_thread()
+
     try:
         if 'main_window' in globals() and main_window and main_window.winfo_exists():
             main_window.after(0, lambda: update_status(final_status_string))
@@ -1742,8 +1851,6 @@ def perform_verification(show_results_box=False, on_startup=False):
                 if error_messages:
                     startup_message = "Initial Configuration Issues Found:\n\n" + "\n".join(error_messages) + "\n\nPlease use 'Settings' to correct the .env file and then click 'Verify Config'."
                     main_window.after(300, lambda m=startup_message: messagebox.showwarning("Initial Configuration Issues", m))
-        else:
-            pass
     except Exception:
          pass
     if show_results_box:
@@ -1753,10 +1860,9 @@ def perform_verification(show_results_box=False, on_startup=False):
              message_type = messagebox.showinfo if all_checks_ok else messagebox.showwarning
              popup_title = "Verification Complete" if all_checks_ok else "Verification Issues Found"
              main_window.after(0, lambda title=popup_title, msg=results_text: message_type(title, msg))
-        else:
-             pass
 
 def open_config_window():
+    stop_settings_button_blink()
     if 'main_window' not in globals() or not main_window: return
     config_win = ctk.CTkToplevel(main_window)
     config_win.title("Settings (.env Configuration)")
@@ -1788,11 +1894,10 @@ def open_config_window():
                     initial_dir = str(Path.home())
                 selected_path = None
                 if browse_for_file:
-                    selected_path = filedialog.askopenfilename(
-                        title=f"Select {label_text}",
+                    selected_path = filedialog.askdirectory(
+                        title=f"Select {label_text} (.app folder)",
                         initialdir=initial_dir,
                         parent=config_win,
-                        filetypes=[("Application", "*.app")] if platform.system() == "Darwin" else None
                     )
                 else:
                     selected_path = filedialog.askdirectory(
@@ -1977,6 +2082,7 @@ def update_button_states():
         return "normal" if enabled_condition else "disabled"
     settings_enabled = not is_build_running
     verify_enabled = not is_build_running
+    clear_cache_enabled = not is_build_running
     unity_down_enabled = not is_build_running
     about_enabled = not is_build_running
     theme_switch_enabled = not is_build_running
@@ -1991,8 +2097,13 @@ def update_button_states():
         if 'reload_btn' in globals(): reload_btn.configure(state=get_state(reload_enabled), fg_color=BTN_RELOAD_FG_COLOR[mode_idx] if reload_enabled else disabled_fg)
         if 'graph_btn' in globals(): graph_btn.configure(state=get_state(graph_enabled), fg_color=BTN_GRAPH_FG_COLOR[mode_idx] if graph_enabled else disabled_fg)
         if 'create_btn' in globals(): create_btn.configure(state=get_state(create_enabled), fg_color=BTN_CREATE_FG_COLOR[mode_idx] if create_enabled else disabled_fg)
-        if 'settings_btn' in globals(): settings_btn.configure(state=get_state(settings_enabled), fg_color=BTN_SETTINGS_FG_COLOR[mode_idx], hover_color=BTN_SETTINGS_HOVER_COLOR[mode_idx], text_color=BTN_SETTINGS_TEXT_COLOR[mode_idx])
+        if settings_button_blink_job is None:
+            if 'settings_btn' in globals():
+                settings_btn.configure(state=get_state(settings_enabled), fg_color=BTN_SETTINGS_FG_COLOR[mode_idx] if settings_enabled else disabled_fg)
+        elif 'settings_btn' in globals():
+            settings_btn.configure(state=get_state(settings_enabled))
         if 'verify_btn' in globals(): verify_btn.configure(state=get_state(verify_enabled), fg_color=BTN_VERIFY_FG_COLOR[mode_idx], hover_color=BTN_VERIFY_HOVER_COLOR[mode_idx], text_color=BTN_VERIFY_TEXT_COLOR[mode_idx])
+        if 'clear_cache_btn' in globals(): clear_cache_btn.configure(state=get_state(clear_cache_enabled), fg_color=BTN_EXIT_FG_COLOR[mode_idx] if clear_cache_enabled else disabled_fg)
         if 'unity_down_btn' in globals(): unity_down_btn.configure(state=get_state(unity_down_enabled), fg_color=BTN_UNITY_DOWN_FG_COLOR[mode_idx], hover_color=BTN_UNITY_DOWN_HOVER_COLOR[mode_idx], text_color=BTN_UNITY_DOWN_TEXT_COLOR[mode_idx])
         if 'about_btn' in globals(): about_btn.configure(state=get_state(about_enabled), fg_color=BTN_ABOUT_FG_COLOR[mode_idx], hover_color=BTN_ABOUT_HOVER_COLOR[mode_idx], text_color=BTN_ABOUT_TEXT_COLOR[mode_idx])
         if 'exit_btn' in globals(): exit_btn.configure(state=get_state(exit_enabled), fg_color=BTN_EXIT_FG_COLOR[mode_idx], hover_color=BTN_EXIT_HOVER_COLOR[mode_idx], text_color=BTN_EXIT_TEXT_COLOR[mode_idx])
@@ -2363,6 +2474,7 @@ def toggle_appearance_mode():
         if 'graph_btn' in globals(): graph_btn.configure(fg_color=BTN_GRAPH_FG_COLOR[mode_idx], hover_color=BTN_GRAPH_HOVER_COLOR[mode_idx], text_color=BTN_GRAPH_TEXT_COLOR[mode_idx])
         if 'create_btn' in globals(): create_btn.configure(fg_color=BTN_CREATE_FG_COLOR[mode_idx], hover_color=BTN_CREATE_HOVER_COLOR[mode_idx], text_color=BTN_CREATE_TEXT_COLOR[mode_idx])
         if 'clear_search_btn' in globals(): clear_search_btn.configure(fg_color=BTN_CLEARSEARCH_FG_COLOR[mode_idx], hover_color=BTN_CLEARSEARCH_HOVER_COLOR[mode_idx], text_color=BTN_CLEARSEARCH_TEXT_COLOR[mode_idx])
+        if 'clear_cache_btn' in globals(): clear_cache_btn.configure(fg_color=BTN_EXIT_FG_COLOR[mode_idx], hover_color=BTN_EXIT_HOVER_COLOR[mode_idx], text_color=BTN_EXIT_TEXT_COLOR[mode_idx])
         update_button_states()
     except NameError:
         pass
@@ -2371,7 +2483,7 @@ def toggle_appearance_mode():
 
 main_window = ctk.CTk()
 apply_icon(main_window)
-main_window.title("Unity Simulation Manager v1.0")
+main_window.title("Colony Dynamics Simulator v1.0")
 initial_width=1050
 initial_height=700
 center_window(main_window, initial_width, initial_height)
@@ -2403,6 +2515,9 @@ settings_btn.pack(fill="x", padx=15, pady=5)
 verify_btn = ctk.CTkButton(sidebar_frame, text="Verify Config", command=lambda: perform_verification(show_results_box=True), font=APP_FONT,
                            fg_color=BTN_VERIFY_FG_COLOR[mode_idx], hover_color=BTN_VERIFY_HOVER_COLOR[mode_idx], text_color=BTN_VERIFY_TEXT_COLOR[mode_idx])
 verify_btn.pack(fill="x", padx=15, pady=5)
+clear_cache_btn = ctk.CTkButton(sidebar_frame, text="Clear API Cache", command=clear_api_cache, font=APP_FONT,
+                                fg_color=BTN_EXIT_FG_COLOR[mode_idx], hover_color=BTN_EXIT_HOVER_COLOR[mode_idx], text_color=BTN_EXIT_TEXT_COLOR[mode_idx])
+clear_cache_btn.pack(fill="x", padx=15, pady=5)
 separator = ctk.CTkFrame(sidebar_frame, height=2, fg_color="gray")
 separator.pack(fill="x", padx=15, pady=15)
 
@@ -2514,7 +2629,7 @@ unity_down_btn = ctk.CTkButton(sidebar_frame, text="Download Unity Editor",
                               fg_color=BTN_UNITY_DOWN_FG_COLOR[mode_idx], hover_color=BTN_UNITY_DOWN_HOVER_COLOR[mode_idx], text_color=BTN_UNITY_DOWN_TEXT_COLOR[mode_idx])
 unity_down_btn.pack(fill="x", padx=15, pady=5)
 about_btn = ctk.CTkButton(sidebar_frame, text="About",
-                          command=lambda: messagebox.showinfo("About", "Unity Simulation Manager v1.0.\n\nAuthors:\nIván Cáceres S.\nTobías Guerrero Ch."),
+                          command=lambda: messagebox.showinfo("About", "Colony Dynamics Simulator v1.0.\n\nAuthors:\nIván Cáceres S.\nTobías Guerrero Ch."),
                           font=APP_FONT,
                           fg_color=BTN_ABOUT_FG_COLOR[mode_idx], hover_color=BTN_ABOUT_HOVER_COLOR[mode_idx], text_color=BTN_ABOUT_TEXT_COLOR[mode_idx])
 about_btn.pack(fill="x", padx=15, pady=5)
@@ -2535,7 +2650,7 @@ main_content_frame.rowconfigure(3, weight=0)
 header_frame = ctk.CTkFrame(main_content_frame, fg_color="transparent")
 header_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 5))
 header_frame.columnconfigure(0, weight=1)
-ctk.CTkLabel(header_frame, text="Unity Simulation Manager", font=TITLE_FONT, anchor="center").grid(row=0, column=0, pady=(0, 10))
+ctk.CTkLabel(header_frame, text="Colony Dynamics Simulator", font=TITLE_FONT, anchor="center").grid(row=0, column=0, pady=(0, 10))
 search_frame = ctk.CTkFrame(main_content_frame, fg_color="transparent")
 search_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(5, 5))
 search_frame.columnconfigure(1, weight=1)
