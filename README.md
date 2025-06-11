@@ -92,7 +92,7 @@ With the server's `.env` file configured, you can start the server.
 
 1.  **Navigate to the server directory:** `cd server_app`
 2.  **Run the setup script:** `./setup_and_run.sh`
-3.  The server will be active at `http://127.0.0.1:8000`. Keep this terminal open.
+3.  The server will be running at `http://YOUR_PUBLIC_IP:5000`.
 
 ## 6. Client Setup and Build
 
