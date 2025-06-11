@@ -13,7 +13,7 @@ REQUIRED_PYTHON_VERSION='3.9.11'
 VENV_DIR_NAME=".venv"
 REQUIREMENTS_FILE="Mac_requirements.txt" # Using Mac specific requirements
 SETUP_FILE="Mac_build_setup.py"          # py2app setup file
-APP_NAME="SimulationManager"             # Match the name in setup.py if needed for paths
+APP_NAME="ColonyDynamicsSimulator"             # Match the name in setup.py if needed for paths
 DIST_DIR_NAME="Mac_dist"                 # Final output directory name
 ITEMS_TO_COPY_REL=(".env" "img" "Template") # Items relative to $SCRIPT_DIR to copy alongside .app
 # --- Calculated Paths ---

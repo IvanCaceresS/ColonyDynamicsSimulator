@@ -631,7 +631,7 @@ def import_codes(codes: Dict[str, str], simulation_name: str) -> bool:
 DELIMITER = "%|%"
 RESPONSES_CSV = None
 try:
-    APP_DATA_DIR_DOCS = Path.home() / "Documents" / "UnitySimulationManagerData"
+    APP_DATA_DIR_DOCS = Path.home() / "Documents" / "ColonyDynamicsSimulatorData"
     APP_DATA_DIR_DOCS.mkdir(parents=True, exist_ok=True)
     RESPONSES_DIR_DOCS = APP_DATA_DIR_DOCS / "Responses"
     RESPONSES_DIR_DOCS.mkdir(parents=True, exist_ok=True)
@@ -1888,18 +1888,21 @@ def open_config_window():
                 current_path = entry_var.get()
                 if current_path:
                     potential_dir = Path(current_path)
-                    if potential_dir.is_file() and potential_dir.parent.is_dir(): initial_dir = str(potential_dir.parent)
+                    if potential_dir.is_file(): initial_dir = str(potential_dir.parent)
                     elif potential_dir.is_dir(): initial_dir = str(potential_dir)
+                    elif potential_dir.name.endswith(".app") and potential_dir.parent.is_dir(): initial_dir = str(potential_dir.parent)
+
                 elif dict_key == "projects_path" and Path.home().is_dir():
                     initial_dir = str(Path.home())
                 selected_path = None
-                if browse_for_file:
-                    selected_path = filedialog.askdirectory(
-                        title=f"Select {label_text} (.app folder)",
+                if browse_for_file: # For Unity Executable, allow selecting .app bundle
+                    selected_path = filedialog.askopenfilename(
+                        title=f"Select {label_text}",
                         initialdir=initial_dir,
                         parent=config_win,
+                        filetypes=[("Application", "*.app")] if platform.system() == "Darwin" else None
                     )
-                else:
+                else: # Browse for directory
                     selected_path = filedialog.askdirectory(
                         title=f"Select {label_text}",
                         initialdir=initial_dir,

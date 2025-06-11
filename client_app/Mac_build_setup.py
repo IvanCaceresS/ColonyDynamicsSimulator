@@ -5,7 +5,7 @@ import sys
 import site
 import shutil 
 
-APP_NAME = "SimulationManager"
+APP_NAME = "ColonyDynamicsSimulator"
 MAIN_SCRIPT = 'Mac_main.py'
 VERSION = '1.0.0'
 ICON_MAC = 'img/icon.icns'

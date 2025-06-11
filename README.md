@@ -15,8 +15,8 @@ Both components must be running for the simulation to work correctly.
 
 Before you begin, ensure you have the following:
 
-* **Unity Editor:** Ensure the Unity version specified in `client_app/Template/ProjectSettings/ProjectVersion.txt` is installed.
-* **Python:** Python 3.9 or higher.
+* **Unity Editor:** Ensure the Unity version is 6000.0.32f1.
+* **Python:** Python 3.9.11.
 * **OpenAI Account:** An OpenAI account and API key are required for model fine-tuning.
 * **Fine-tuning data files:** `fine-tuning-llm1.jsonl` and `fine-tuning-llm2.jsonl`.
 
@@ -79,10 +79,9 @@ This file contains the local paths to build the Unity application and the API ke
 
 3.  **Fill in the required values:**
     * `UNITY_EXECUTABLE_PATH`: The absolute path to the Unity Editor executable.
-        * **Example (Windows):** `C:/Program Files/Unity/Hub/Editor/2022.3.20f1/Editor/Unity.exe`
-        * **Example (macOS):** `/Applications/Unity/Hub/Editor/2022.3.20f1/Unity.app/Contents/MacOS/Unity`
-    * `UNITY_PROJECTS_PATH`: The absolute path to the `Template` Unity project directory.
-        * **Example:** `/full/path/to/ColonyDynamicsSimulator/client_app/Template`
+        * **Example (Windows):** `C:/Program Files/Unity/Hub/Editor/6000.0.32f1/Editor/Unity.exe`
+        * **Example (macOS):** `/Applications/Unity/Hub/Editor/6000.0.32f1/Unity.app/Contents/MacOS/Unity`
+    * `UNITY_PROJECTS_PATH`: The absolute path to your personal Unity project directory.
     * `API_KEY`: The shared secret key to access the server.
 
 > **Important:** The value for `API_KEY` in the client's `.env` file **must be exactly the same** as the value for `API_SERVER_KEY` in the server's `.env` file. This acts as a shared password between the two applications.
@@ -107,7 +106,7 @@ Once your `.env` file is correctly set up with your OpenAI API key and fine-tune
     ```powershell
     .\Windows_build.ps1
     ```
-4.  **Run Application:** After a successful build, the application will be located at `./Windows_dist/SimulationManager.exe`. You can run this executable.
+4.  **Run Application:** After a successful build, the application will be located at `./Windows_dist/ColonyDynamicsSimulator.exe`. You can run this executable.
 
 ### On macOS
 
@@ -116,11 +115,11 @@ Once your `.env` file is correctly set up with your OpenAI API key and fine-tune
     ```bash
     sudo ./Mac_build.sh
     ```
-3.  **Run Application:** After the build process completes, the application bundle will be named `SimulationManager.app`. The executable is located inside this bundle at `SimulationManager.app/Contents/MacOS/SimulationManager`. To run it, navigate to this path in the Terminal and execute it:
+3.  **Run Application:** After the build process completes, the application bundle will be named `ColonyDynamicsSimulator.app`. The executable is located inside this bundle at `ColonyDynamicsSimulator.app/Contents/MacOS/ColonyDynamicsSimulator`. To run it, navigate to this path in the Terminal and execute it:
     ```bash
-    ./SimulationManager.app/Contents/MacOS/SimulationManager
+    ./ColonyDynamicsSimulator.app/Contents/MacOS/ColonyDynamicsSimulator
     ```
-    Alternatively, you might be able to run it by double-clicking the `SimulationManager.app` bundle in Finder, but running from the terminal as shown above is recommended if you encounter issues or need to see console output.
+    Alternatively, you might be able to run it by double-clicking the `ColonyDynamicsSimulator.app` bundle in Finder, but running from the terminal as shown above is recommended if you encounter issues or need to see console output.
 
 ## 7. Troubleshooting
 
